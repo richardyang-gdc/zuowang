@@ -13,13 +13,17 @@
 需要 Node.js 18+，**无需 `npm install`**（零依赖）。
 
 ```bash
-npm start
+npm start         # 生产启动
+npm run dev       # 开发热更新（改 server.js 自动重启，需 Node 18.11+）
 # 打开 http://127.0.0.1:3000
 ```
 
+- 默认监听 `0.0.0.0`：本机、ECS 内网 IP、公网 IP 都能访问，无需改代码
 - 端口被占用：`PORT=3001 npm start`
-- 服务仅监听 `127.0.0.1`，默认只有本机能访问
+- 只想本机可访问：`HOST=127.0.0.1 npm start`
 - 停止：按 `Ctrl+C`
+
+部署到 ECS、systemd 托管、快速迭代与验证见 [DEPLOY.md](DEPLOY.md)。
 
 ## 体验与交互
 
@@ -40,6 +44,13 @@ npm start
 zuowang-mvp/
 ├── server.js                       # 零依赖 Node 服务：静态托管 / 埋点 / 统计
 ├── package.json
+├── README.md
+├── DEPLOY.md                       # ECS 部署与快速迭代方案
+├── deploy/
+│   ├── setup-ecs.sh                # 首次部署：建用户/装 systemd/开防火墙
+│   ├── update.sh                   # 服务器一键更新（保留埋点数据）
+│   ├── dev-deploy.sh               # 本机一条命令：提交+推送+远程更新
+│   └── zuowang.service             # systemd 服务模板
 ├── smoke-test.sh                   # 本地冒烟测试（会清空 data/visits.jsonl）
 ├── public/
 │   ├── index.html                  # 页面结构

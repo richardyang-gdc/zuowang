@@ -4,9 +4,10 @@
   "private": true,
   "description": "坐忘 MVP - 一个点在即入、随时抽离的网页静室（零依赖）",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18.11"
   }
 }

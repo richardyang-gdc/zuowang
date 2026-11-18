@@ -5,9 +5,12 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const PORT = Number(process.env.PORT) || 3000;
-const HOST = '127.0.0.1'; // 仅本机可访问，测试更安全
+// 默认监听所有网卡：本机 127.0.0.1 与 ECS 的内网/公网 IP 都能访问。
+// 想恢复仅本机可访问，启动时加 HOST=127.0.0.1 即可。
+const HOST = process.env.HOST || '0.0.0.0';
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const DATA_DIR = path.join(ROOT, 'data');
@@ -164,7 +167,7 @@ function computeStats(events) {
 // ---- 路由 ----
 const server = http.createServer(async (req, res) => {
   try {
-    const url = new URL(req.url, `http://${HOST}`);
+    const url = new URL(req.url, 'http://localhost');
     const p = url.pathname;
 
     if (req.method === 'GET' && p === '/api/health') {
@@ -235,9 +238,27 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
+// 列出可访问的网卡地址，部署到 ECS 后一眼看到该用哪个 IP
+function lanAddresses() {
+  const out = [];
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const item of ifaces[name] || []) {
+      if (item.family === 'IPv4' && !item.internal) out.push(`${name}: ${item.address}`);
+    }
+  }
+  return out;
+}
+
 server.listen(PORT, HOST, () => {
-  console.log('坐忘 MVP 已启动');
-  console.log(`  本地访问: http://${HOST}:${PORT}`);
-  console.log(`  统计数据: http://${HOST}:${PORT}/api/stats`);
+  console.log('坐忘 Senza 已启动');
+  console.log(`  监听地址: ${HOST}:${PORT}`);
+  console.log(`  本机访问: http://127.0.0.1:${PORT}`);
+  console.log(`  统计接口: http://127.0.0.1:${PORT}/api/stats`);
+  const addrs = lanAddresses();
+  if (addrs.length) {
+    console.log('  网络访问（选一个可用 IP）:');
+    for (const line of addrs) console.log(`    http://${line.split(': ')[1]}:${PORT}  [${line.split(': ')[0]}]`);
+  }
   console.log('  按 Ctrl+C 停止');
 });

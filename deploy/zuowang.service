@@ -1,0 +1,27 @@
+[Unit]
+Description=Zuowang Senza (坐忘) - 极简呼吸 H5
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zuowang
+Group=zuowang
+WorkingDirectory=/opt/zuowang
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOST=0.0.0.0
+ExecStart=/usr/bin/node /opt/zuowang/server.js
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+# 最小加固：限制服务能写的目录（数据仍在 /opt/zuowang/data）
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/zuowang/data
+
+[Install]
+WantedBy=multi-user.target
