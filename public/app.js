@@ -320,6 +320,49 @@
     masterGain.gain.linearRampToValueAtTime(volume * MAX_GAIN, now + 2.5);
   }
 
+  // 息屏 / 切后台：先自己把声音淡到 0，再挂起音频上下文。
+  // 若任由系统硬切断，音频硬件断电的那一瞬间会「吱」一声；先静音再挂起就没有这个断点。
+  var quietTimer = null;
+
+  function quietAudio() {
+    if (!audioCtx || !masterGain) return;
+    var now = audioCtx.currentTime;
+    try {
+      masterGain.gain.cancelScheduledValues(now);
+      masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+      masterGain.gain.linearRampToValueAtTime(0, now + 0.08); // 80ms 淡尽，听不出断点
+    } catch (e) {}
+    clearTimeout(quietTimer);
+    quietTimer = setTimeout(function () {
+      // 淡完再挂起：上下文真正空闲，硬件才不会被“带声”切断
+      if (audioCtx && audioCtx.state === 'running' && document.visibilityState !== 'visible') {
+        try { audioCtx.suspend(); } catch (e) {}
+      }
+    }, 180);
+  }
+
+  function wakeAudio() {
+    if (!audioCtx || !masterGain || !started) return;
+    clearTimeout(quietTimer);
+    audioFadeStarted = true; // 由这里接管淡入，避免 onstatechange 再抢一次
+    var target = volume * MAX_GAIN;
+    var ramp = function () {
+      if (!audioCtx || !masterGain) return;
+      var t = audioCtx.currentTime;
+      try {
+        masterGain.gain.cancelScheduledValues(t);
+        masterGain.gain.setValueAtTime(0, t);
+        masterGain.gain.linearRampToValueAtTime(target, t + 1.2); // 回来时慢慢亮起，不突兀
+      } catch (e) {}
+    };
+    if (audioCtx.state === 'running') { ramp(); return; }
+    try {
+      var p = audioCtx.resume();
+      if (p && typeof p.then === 'function') p.then(ramp).catch(function () {});
+      else ramp();
+    } catch (e) {}
+  }
+
   function setupAudioUnlock() {
     // pointerdown 在 iOS 微信里不一定被当成音频手势，touchend/click 更可靠。
     var opts = { once: true, passive: true };
@@ -377,17 +420,37 @@
   var wakeSentinel = null;
   var wakePending = false;   // 申请中：避免多个手势重复 request
   var silentVideo = null;
+  var wakeWatch = null;      // 兜底视频的看门狗：被系统暂停时补播
+
+  function playSilentVideo() {
+    if (!silentVideo) return;
+    var p = silentVideo.play();
+    if (p && typeof p.then === 'function') {
+      p.catch(function () { /* 手势不足时元素保留，下一次手势/回到前台再试 */ });
+    }
+  }
+
+  // iOS / 微信 里兜底视频常被系统悄悄暂停（解码器回收、切前后台），
+  // 一旦停了常亮就静默失效。隔几秒检查一次，别让它悄悄死掉。
+  function watchAwake() {
+    if (wakeWatch) return;
+    wakeWatch = setInterval(function () {
+      if (!awakeWanted || document.visibilityState !== 'visible') return;
+      if (silentVideo && silentVideo.paused) playSilentVideo();
+    }, 4000);
+  }
 
   function startSilentVideo() {
     if (silentVideo) {
-      var again = silentVideo.play();
-      if (again && again.catch) again.catch(function () {});
+      playSilentVideo();
       return;
     }
     try {
       var v = document.createElement('video');
       v.setAttribute('playsinline', '');
       v.setAttribute('webkit-playsinline', '');
+      v.setAttribute('x5-playsinline', '');         // 微信 Android 内联播放
+      v.setAttribute('x5-video-player-type', 'h5-page');
       v.setAttribute('muted', '');
       v.setAttribute('loop', '');
       v.setAttribute('aria-hidden', 'true');
@@ -401,10 +464,8 @@
       v.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none;z-index:-1;';
       document.body.appendChild(v);
       silentVideo = v;
-      var p = v.play();
-      if (p && typeof p.then === 'function') {
-        p.catch(function () { /* 手势不足时元素保留，下一次手势/回到前台再试 */ });
-      }
+      playSilentVideo();
+      watchAwake();
     } catch (e) {
       silentVideo = null;
     }
@@ -436,7 +497,9 @@
           }
           wakeSentinel = sentinel;
           sentinel.addEventListener('release', function () {
-            wakeSentinel = null;   // 系统可能因切后台/省电收回，回前台会重新申请
+            wakeSentinel = null;   // 系统可能因切后台/省电收回
+            // 收回后若仍在体验中且页面可见，再申请一次；失败会自动退回视频兜底
+            if (awakeWanted && document.visibilityState === 'visible') keepAwake();
           });
           stopSilentVideo();       // 原生锁生效，就不需要视频兜底了
         }).catch(function () {
@@ -451,42 +514,39 @@
     startSilentVideo();
   }
 
-  function stopAwake(clearIntent) {
-    if (clearIntent) awakeWanted = false;
-    wakePending = false;
-    if (wakeSentinel) {
-      try { wakeSentinel.release(); } catch (e) {}
-      wakeSentinel = null;
-    }
-    stopSilentVideo();
-  }
-
   // 视频被暂停（手势不足、系统策略）时，在下一次手势里补一次
   function retryAwake() {
     if (!awakeWanted || wakeSentinel) return;
     if (silentVideo) {
-      if (silentVideo.paused) {
-        var p = silentVideo.play();
-        if (p && p.catch) p.catch(function () {});
-      }
+      if (silentVideo.paused) playSilentVideo();
       return;
     }
     keepAwake();
   }
 
+  // 手势不足时下个手势补一次。touchend / pointerup 很关键：微信 iOS 里
+  // 「轻触开始」的 pointerdown 阶段 play() 可能被拒，松手这一刻才是有效手势。
   window.addEventListener('touchstart', retryAwake, { passive: true });
+  window.addEventListener('touchend', retryAwake, { passive: true });
+  window.addEventListener('pointerup', retryAwake);
   window.addEventListener('click', retryAwake);
 
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') {
-      if (awakeWanted) keepAwake();          // 切回来重新申请
+      if (awakeWanted) keepAwake();   // iOS 会在后台自动收回锁，回来重新申请
+      wakeAudio();                    // 声音慢慢亮回来
     } else {
-      stopAwake(false);                      // 后台先放开，省电；意图保留
+      // 只把自己的声音收干净，**不拆兜底媒体**：一旦拆掉，回到前台时没有用户手势，
+      // iOS 不会允许它再播放，常亮就永久失效（这也是之前“屏幕还是会睡”的原因之一）。
+      quietAudio();
     }
   });
-  window.addEventListener('pagehide', function () { stopAwake(false); });
+  window.addEventListener('pagehide', function () { quietAudio(); });
+  document.addEventListener('freeze', function () { quietAudio(); }); // 页面被系统冻结前也先静音
   window.addEventListener('pageshow', function (e) {
-    if (e.persisted && awakeWanted) keepAwake();
+    if (!e.persisted) return;
+    if (awakeWanted) keepAwake();
+    wakeAudio();
   });
 
   function playBowl() {
