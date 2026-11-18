@@ -120,35 +120,42 @@ body {
 
 /* ---- 竖向音量滑杆：点声音图标后从下方淡入，保持同一套暖灰与圆点语言 ---- */
 #volume-wrap {
-  position: fixed; z-index: 6; top: 66px; right: 11px;
-  width: 52px; height: 176px; padding: 12px 0;
+  position: fixed; z-index: 6; top: 66px; right: 18px;   /* 与 #sound-toggle 同轴同宽 */
+  width: 38px; height: 132px;
   display: flex; align-items: center; justify-content: center;
   background: rgba(28,25,22,.5); border: 1px solid rgba(208,200,188,.18);
-  border-radius: 26px; backdrop-filter: blur(4px);
+  border-radius: 19px; backdrop-filter: blur(4px);
   opacity: 0; pointer-events: none; transform: translateY(-6px);
   transition: opacity .45s ease, transform .45s ease;
 }
 #volume-wrap.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+/* 视觉是 4px 细杆，但盒子宽 44px 全部透明可触；高度必须等于视觉轨道长度，
+   否则滑块会与轨道错位（range 的取值按整个盒子高度均分） */
 #volume-range {
   -webkit-appearance: none; appearance: none;
   writing-mode: vertical-lr; direction: rtl;   /* 上大下小 */
-  width: 6px; height: 136px; margin: 0;
-  background: rgba(218,212,202,.2); border-radius: 3px; outline: none;
-  cursor: pointer; touch-action: none;
+  width: 44px; height: 104px; margin: 0; padding: 0;
+  background: linear-gradient(rgba(218,212,202,.2), rgba(218,212,202,.2))
+              center / 4px 104px no-repeat;
+  outline: none; cursor: pointer; touch-action: none;
+}
+#volume-range::-webkit-slider-runnable-track {
+  -webkit-appearance: none; appearance: none;
+  background: transparent; border: none;
 }
 #volume-range::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
-  width: 20px; height: 20px; border-radius: 50%;
+  width: 12px; height: 12px; border-radius: 50%;
   background: rgba(222,216,206,.85); border: 1px solid rgba(208,200,188,.5);
   box-shadow: 0 0 6px rgba(222,216,206,.25); cursor: pointer;
   transition: background .3s;
 }
 #volume-range::-moz-range-thumb {
-  width: 20px; height: 20px; border-radius: 50%;
+  width: 12px; height: 12px; border-radius: 50%;
   background: rgba(222,216,206,.85); border: 1px solid rgba(208,200,188,.5);
   cursor: pointer;
 }
-#volume-range::-moz-range-track { width: 6px; background: rgba(218,212,202,.2); border-radius: 3px; }
+#volume-range::-moz-range-track { width: 4px; background: transparent; border: none; }
 
 /* ---- 手动模式提示：仅手动 + 核心词正出现时，于其下方淡入 ---- */
 #press-hint {
