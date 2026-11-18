@@ -65,9 +65,12 @@ body {
 .text-main.is-word { font-size: clamp(25px, 6.5vw, 40px); letter-spacing: .2em; color: rgba(228,222,212,.78); transition-duration: .7s; }
 .text-main.sinking { animation: sink 7s ease-in-out infinite; }
 @keyframes sink { 0%,100% { transform: translateY(-5px); } 50% { transform: translateY(5px); } }
+/* 消散：只做淡出与化开，绝不碰 transform、也不停掉 sink 浮动。
+   一旦在这里写 animation:none 或改 scale，动画值被撤掉的瞬间文字会“顿”一下。 */
 .text-main.dissolving {
-  opacity: 0 !important; filter: blur(4px); transform: scale(.98); animation: none;
-  transition: opacity 2.5s ease, filter 2.5s ease, transform 2.5s ease;
+  opacity: 0 !important;
+  filter: blur(4px);
+  transition: opacity 2.5s ease, filter 2.5s ease;
 }
 
 /* ---- 沉浸山谷 ---- */
