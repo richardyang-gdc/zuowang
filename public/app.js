@@ -214,6 +214,7 @@
   var audioCtx = null;
   var masterGain = null;
   var audioReady = false;
+  var audioFadeStarted = false;
   var MAX_GAIN = 0.7;        // 滑杆拉满时的主增益
   var VOL_KEY = 'zw_volume';
   function loadVolume() {
@@ -226,11 +227,16 @@
   var volume = loadVolume(); // 0..1，滑到底为 0（静音）
   var bowlTimer = null;
 
-  function initAudio() {
-    if (audioReady) return;
+  function ensureAudioCtx() {
+    if (audioCtx) return true;
     var AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    audioCtx = new AC();
+    if (!AC) return false;
+    try {
+      audioCtx = new AC();
+    } catch (e) {
+      audioCtx = null;
+      return false;
+    }
     masterGain = audioCtx.createGain();
     masterGain.gain.value = 0;
     masterGain.connect(audioCtx.destination);
@@ -260,11 +266,66 @@
     lfo.start();
 
     audioReady = true;
+    audioCtx.onstatechange = function () {
+      if (audioCtx && audioCtx.state === 'running' && started && !audioFadeStarted) {
+        fadeInAudio();
+      }
+    };
     scheduleBowl();
+    return true;
   }
 
+  // 微信/iOS 的音频解锁：必须在真实手势里 resume；失败时等下一次手势重试。
+  function unlockAudio() {
+    if (!ensureAudioCtx() || !audioCtx) return;
+    if (audioCtx.state === 'running') {
+      if (started && !audioFadeStarted) fadeInAudio();
+      return;
+    }
+    // 不设“正在恢复”锁：iOS 上 touchstart 的 resume 可能一直 pending，
+    // touchend/click 需要能再次尝试；resume() 本身是幂等的。
+    try {
+      var p = audioCtx.resume();
+      if (p && typeof p.then === 'function') {
+        p.then(function () {
+          if (started && !audioFadeStarted) fadeInAudio();
+        }).catch(function () {});
+      }
+    } catch (e) {}
+  }
+
+  function fadeInAudio() {
+    if (!ensureAudioCtx() || !audioCtx || !masterGain) return;
+    if (audioCtx.state !== 'running') return;
+    if (audioFadeStarted) return;
+    audioFadeStarted = true;
+    var now = audioCtx.currentTime;
+    masterGain.gain.cancelScheduledValues(now);
+    masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+    masterGain.gain.linearRampToValueAtTime(volume * MAX_GAIN, now + 2.5);
+  }
+
+  function setupAudioUnlock() {
+    // pointerdown 在 iOS 微信里不一定被当成音频手势，touchend/click 更可靠。
+    var opts = { once: true, passive: true };
+    window.addEventListener('touchstart', unlockAudio, opts);
+    window.addEventListener('touchend', unlockAudio, opts);
+    window.addEventListener('click', unlockAudio, opts);
+    window.addEventListener('pointerup', unlockAudio, opts);
+
+    // 微信 JS Bridge 兜底：部分 iOS 微信需要这个回调才允许出声。
+    if (typeof window.WeixinJSBridge !== 'undefined' && window.WeixinJSBridge.invoke) {
+      try {
+        window.WeixinJSBridge.invoke('getNetworkType', {}, function () { unlockAudio(); });
+      } catch (e) {}
+    } else {
+      document.addEventListener('WeixinJSBridgeReady', function () { unlockAudio(); }, false);
+    }
+  }
+  setupAudioUnlock();
+
   function playBowl() {
-    if (!audioReady || volume <= 0 || !audioCtx) return;
+    if (!audioReady || volume <= 0 || !audioCtx || audioCtx.state !== 'running') return;
     var now = audioCtx.currentTime;
     var base = 180 + Math.random() * 60;
     var partials = [1, 2.01, 3.03, 4.2];
@@ -293,18 +354,13 @@
     }, 11000 + Math.random() * 7000);
   }
 
-  function fadeInAudio() {
-    initAudio();
-    if (!audioCtx) return;
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
-    masterGain.gain.setValueAtTime(masterGain.gain.value, audioCtx.currentTime);
-    masterGain.gain.linearRampToValueAtTime(volume * MAX_GAIN, audioCtx.currentTime + 2.5);
-  }
-
   // ---------- 右上角开关与音量 ----------
   function applyVolume(animate) {
-    if (!masterGain || !audioCtx) return;
+    if (!ensureAudioCtx() || !masterGain || !audioCtx) return;
+    if (audioCtx.state !== 'running') {
+      unlockAudio(); // 拖动音量也是用户手势，顺手补一次解锁
+      return;
+    }
     var target = volume * MAX_GAIN;
     var now = audioCtx.currentTime;
     masterGain.gain.cancelScheduledValues(now);
@@ -325,7 +381,7 @@
     var showing = volumeWrap.classList.toggle('show');
     volumeWrap.setAttribute('aria-hidden', showing ? 'false' : 'true');
     soundBtn.setAttribute('aria-expanded', showing ? 'true' : 'false');
-    if (showing) initAudio(); // 首次展开即就绪，拖动立刻出声
+    if (showing) unlockAudio(); // 首次展开即解锁，拖动立刻出声
   });
 
   // 拖动滑杆：实时调音量，滑到底静音；记住选择
@@ -457,8 +513,9 @@
   function begin() {
     if (started) return;
     started = true;
+    // 必须尽早、且在真实手势里解锁；不要先跑 1000 个粒子再初始化音频。
+    unlockAudio();
     spawnMotes(1000);
-    fadeInAudio();
     state = 'breath';
     switchStage(null, stageBreath);
     hideText(); // “轻触开始”淡出
