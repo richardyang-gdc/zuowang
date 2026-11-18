@@ -6,6 +6,8 @@
 
 `Senza` 是意大利语的「without / 没有」，对应《大宗师》的「离形去知」——不是失忆，而是暂时放下身体、念头和身份。
 
+![alt text](public/zuowang.png)
+
 ## 快速开始
 
 需要 Node.js 18+，**无需 `npm install`**（零依赖）。
