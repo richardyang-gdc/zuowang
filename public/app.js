@@ -570,23 +570,26 @@
     track(autoMode ? 'mode_auto' : 'mode_manual');
   });
 
-  // ---------- 全屏 / 沉浸模式 ----------
-  // 有元素级全屏 API 就用它（Android 浏览器、桌面）；iPhone 的 Safari 与微信内核都没有这个能力，
-  // 地址栏由系统绘制、网页无权隐藏，于是同一枚按钮降级为「沉浸模式」：收起自身控件，只剩呼吸。
+  // ---------- 全屏 ----------
+  // 桌面：保留右上角按钮。触屏：不占界面，轻触屏幕在全屏 / 还原之间切换。
+  // iPhone 没有元素级全屏 API（地址栏由系统绘制、网页无权隐藏），此时「全屏」= 沉浸模式：
+  // 收起控件，只剩呼吸；再轻触一下还原。
   var fsRoot = document.documentElement;
   var fsRequest = fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen;
   var fsExit = document.exitFullscreen || document.webkitExitFullscreen;
+  var touchUI = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  if (touchUI) fsRoot.classList.add('touch-ui');
 
   function fsElement() {
     return document.fullscreenElement || document.webkitFullscreenElement || null;
   }
   function immersiveOn() { return fsRoot.classList.contains('is-immersive'); }
+  function fsOn() { return !!fsElement() || immersiveOn(); }
 
-  // 图标与无障碍文案只认「是否处于沉浸态」，真全屏与伪全屏共用一套
+  // 图标与无障碍文案只认「是否已全屏」，真全屏与沉浸共用一套
   function syncFsUI() {
-    var on = !!fsElement() || immersiveOn();
     fsRoot.classList.toggle('is-fullscreen', !!fsElement());
-    if (fsBtn) fsBtn.setAttribute('aria-label', on ? '退出全屏' : '全屏');
+    if (fsBtn) fsBtn.setAttribute('aria-label', fsOn() ? '退出全屏' : '全屏');
     requestAnimationFrame(resize); // 工具栏收起/展开、控件进出，画布都要重新量尺寸
   }
 
@@ -598,32 +601,35 @@
   }
   function exitImmersive() {
     if (!immersiveOn()) return;
-    fsRoot.classList.remove('is-immersive', 'ui-awake');
+    fsRoot.classList.remove('is-immersive');
     syncFsUI();
   }
-  // 沉浸态下轻触屏幕把控件唤回来，否则用户找不到退出的地方
-  function wakeControls() {
-    if (immersiveOn() && !fsRoot.classList.contains('ui-awake')) fsRoot.classList.add('ui-awake');
+  // 进入：有 API 就真全屏，被 WebView 拒绝或没有 API 就降级为沉浸模式
+  function enterFs() {
+    if (fsRequest) {
+      var p = fsRequest.call(fsRoot);
+      if (p && p.catch) p.catch(function () { enterImmersive(); });
+      return;
+    }
+    enterImmersive();
   }
+  function exitFs() {
+    if (fsElement()) {
+      var out = fsExit && fsExit.call(document);
+      if (out && out.catch) out.catch(function () {});
+      return;
+    }
+    exitImmersive();
+  }
+  // 退出优先：否则「有 API 但被拒」降级后，每次切换都会再请求一次被拒的全屏，永远退不出来
+  function toggleFs() { if (fsOn()) exitFs(); else enterFs(); }
 
   if (fsBtn) {
     fsBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       closeVolumePanel();
       unlockAudio(); // 顺手借这次手势解锁音频，微信里少一次试错
-      if (fsElement()) { // 已在真全屏：退出
-        var out = fsExit && fsExit.call(document);
-        if (out && out.catch) out.catch(function () {});
-        return;
-      }
-      // 已在沉浸态就退出——不能因为「本机有 API」又去请求一次被拒的真全屏，否则永远退不出来
-      if (immersiveOn()) { exitImmersive(); return; }
-      if (fsRequest) { // 有 API 就先试真全屏；被 WebView 拒绝时降级，而不是点了没反应
-        var p = fsRequest.call(fsRoot);
-        if (p && p.catch) p.catch(function () { enterImmersive(); });
-        return;
-      }
-      enterImmersive(); // iPhone：只能降级
+      toggleFs();
     });
   }
   document.addEventListener('fullscreenchange', syncFsUI);
@@ -812,6 +818,10 @@
     soundBtn.setAttribute('aria-expanded', 'false');
   }
 
+  // 触屏：轻触屏幕即在全屏 / 还原之间切换，界面因此不必常驻控件。
+  // 规则：第一次点击仍只负责开始；长按（手动模式把词散去）与滑动都不算轻触；点在控件上不算。
+  var tapAt = 0, tapX = 0, tapY = 0, tapStarted = false, tapArmed = false;
+
   function onPressDown(e) {
     if (e.target && e.target.closest && e.target.closest('#volume-wrap, #sound-toggle, #fs-toggle')) return;
     if (e.target && e.target.closest && e.target.closest('#mode-toggle')) {
@@ -819,7 +829,12 @@
       return;
     }
     closeVolumePanel();
-    wakeControls(); // 沉浸态下先点屏幕，控件就回来
+    if (touchUI) {
+      tapArmed = true;
+      tapStarted = started;
+      tapAt = performance.now();
+      tapX = e.clientX; tapY = e.clientY;
+    }
     if (!started) { begin(); return; }
     if (!autoMode && wordActive && !dissipating) {
       pressing = true;
@@ -828,11 +843,21 @@
       tickPress();
     }
   }
-  function onPressUp() { cancelPress(); }
+  function onPressUp(e) {
+    cancelPress();
+    if (!tapArmed) return;
+    tapArmed = false;
+    if (!e || e.type !== 'pointerup') return;                                      // 被系统取消的触摸不算
+    if (!tapStarted) return;                                                       // 开始那一下只管开始
+    if (performance.now() - tapAt > 350) return;                                   // 长按不算轻触
+    if (Math.abs(e.clientX - tapX) > 12 || Math.abs(e.clientY - tapY) > 12) return; // 滑动不算轻触
+    toggleFs();
+  }
+  function onPressCancel() { cancelPress(); tapArmed = false; }
 
   window.addEventListener('pointerdown', onPressDown);
   window.addEventListener('pointerup', onPressUp);
-  window.addEventListener('pointercancel', onPressUp);
+  window.addEventListener('pointercancel', onPressCancel);
   window.addEventListener('keydown', function (e) {
     if (e.code === 'Space' || e.code === 'Enter') {
       e.preventDefault();

@@ -124,13 +124,16 @@ html.is-fullscreen #mode-toggle,
 html.is-fullscreen #fs-toggle { top: calc(18px + env(safe-area-inset-top)); }
 html.is-fullscreen #volume-wrap { top: calc(66px + env(safe-area-inset-top)); }
 
-/* 沉浸模式：iPhone 的 Safari 与微信内核都没有元素级全屏 API（地址栏由系统绘制，
-   网页无权隐藏），按钮降级为「收起自身控件，只剩呼吸」。轻触屏幕唤回控件。 */
+/* 触屏：不显示全屏按钮，轻触屏幕即在全屏 / 还原之间切换 */
+html.touch-ui #fs-toggle { display: none; }
+/* 全屏 / 沉浸时收起其余控件，画面只剩呼吸（桌面真全屏仍保留控件，行为不变） */
 html.is-immersive { overscroll-behavior: none; }
-html.is-immersive:not(.ui-awake) #fs-toggle,
-html.is-immersive:not(.ui-awake) #mode-toggle,
-html.is-immersive:not(.ui-awake) #sound-toggle,
-html.is-immersive:not(.ui-awake) #volume-wrap { opacity: 0; pointer-events: none; }
+html.is-immersive #mode-toggle,
+html.is-immersive #sound-toggle,
+html.is-immersive #volume-wrap,
+html.touch-ui.is-fullscreen #mode-toggle,
+html.touch-ui.is-fullscreen #sound-toggle,
+html.touch-ui.is-fullscreen #volume-wrap { opacity: 0; pointer-events: none; }
 /* 手动模式激活（默认自动；点亮表示"需手动长按"） */
 #mode-toggle.manual { color: rgba(236,222,190,.95); border-color: rgba(214,190,140,.55); background: rgba(66,56,38,.6); }
 
