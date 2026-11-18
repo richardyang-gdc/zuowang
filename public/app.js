@@ -85,6 +85,7 @@
   var WORD_PREPARE_AT = WORD_AT - FADE;           // 吸气末先让“吸”淡出，吸满时环心正好空出来
   var WORD_DISSOLVE_AT = CYCLE_MS - DISSOLVE_MS;  // 呼气末段起化尘，正好与环触底同时散尽
   var MANUAL_MAX_MS = CYCLE_MS * 3;               // 手动模式最多停留 3 轮呼吸，之后自己化尘
+  var HU_FADE_AT = CYCLE_MS - 1400;               // 首轮无词时，“呼”陪到触底前一刻才开始淡出
   var PRESS_MS = 900;       // 手动模式长按散去的阈值
 
   var WORDS = ['松开', '让它流过', '不必抓住', '在此刻', '呼吸'];
@@ -684,12 +685,19 @@
       return;
     }
     if (s === 2) {
-      // 吸气顶点：词淡入，陪用户走完整个呼气；首轮雾未散时不打扰，只留呼吸
-      if (!wordActive && state === 'hold') spawnWord(ts);
+      // 吸气顶点：词淡入，陪用户走完整个呼气。
+      // 首轮雾还没散、不该出词，那就把“呼”放回环心——收缩的 6 秒不能空着。
+      if (wordActive) return;
+      if (state === 'hold') {
+        spawnWord(ts);
+      } else {
+        setText('呼', 'breath');
+        showText();
+      }
       return;
     }
-    // 呼气末段：自动模式随环收拢化尘；手动模式等长按，超过三轮由兜底处理
-    if (autoMode) dissipate();
+    // 呼气末段：词随环收拢化尘；手动模式等长按，超过三轮由 beatTick 里的兜底处理
+    if (wordActive && autoMode) dissipate();
   }
 
   function beatTick(ts) {
@@ -702,6 +710,9 @@
           : p < INHALE_MS ? 1
           : p < WORD_DISSOLVE_AT ? 2 : 3;
     if (s !== seg) { seg = s; enterSeg(s, ts); }
+
+    // 首轮雾未散、环心没有词：让“呼”一直陪到触底前 1.4s 再淡出，收缩段不再空着
+    if (!wordActive && s === 3 && p >= HU_FADE_AT && textMain.classList.contains('show')) hideText();
 
     // 手动模式兜底：一直没人长按，三轮呼吸后自己化尘
     if (wordActive && !dissipating && !autoMode && ts - wordBornAt >= MANUAL_MAX_MS) dissipate();
