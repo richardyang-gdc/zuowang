@@ -1,0 +1,7 @@
+# 运行时匿名埋点数据，不入库
+data/
+
+# 依赖与系统文件
+node_modules/
+.DS_Store
+*.log

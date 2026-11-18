@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0d0c">
+<title>坐忘</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div id="vignette"></div>
+
+  <!-- 呼吸圆环：环内文字（轻触开始 / 吸呼 / 核心词）共用一个位置 -->
+  <div id="breath-anchor">
+    <div id="breath-ring">
+      <span id="text-main" class="text-main is-hint">轻触开始</span>
+    </div>
+  </div>
+
+  <!-- 手动模式提示：仅在核心词出现、且处于手动模式时，于其下方淡入 -->
+  <div id="press-hint">长按</div>
+
+  <div id="stage-breath" class="stage active"></div>
+
+  <div id="stage-hold" class="stage">
+    <div class="valley">
+      <div class="layer mountain-far"></div>
+      <!-- 天际线最下层：若隐若现的盘坐禅修者（纯 SVG） -->
+      <svg id="meditator" viewBox="0 0 120 90" aria-hidden="true">
+        <circle cx="60" cy="20" r="9"/>
+        <path d="M42 34 Q60 27 78 34 L80 52 Q60 46 40 52 Z"/>
+        <path d="M40 52 Q60 46 80 52 L96 64 Q60 74 24 64 Z"/>
+        <path d="M24 64 Q60 78 96 64 Q60 84 24 64 Z"/>
+      </svg>
+      <div class="layer mountain-mid"></div>
+      <div class="layer mountain-near"></div>
+      <div class="mist"></div>
+    </div>
+  </div>
+
+  <button id="mode-toggle" aria-label="切换手动模式" title="默认自动；开启后需长按屏幕让文字散去">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+      <circle cx="6" cy="8" r="1.5"/><circle cx="12" cy="5.5" r="1.1" opacity=".85"/>
+      <circle cx="17.5" cy="9" r="1.3" opacity=".75"/><circle cx="8" cy="15" r="1.1" opacity=".8"/>
+      <circle cx="15" cy="16.5" r="1.5" opacity=".65"/>
+    </svg>
+  </button>
+
+  <button id="sound-toggle" aria-label="切换声音">
+    <svg viewBox="0 0 24 24" width="18" height="18"><path id="spk-icon" fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 00-2-3.7v7.4a4.5 4.5 0 002-3.7z"/></svg>
+  </button>
+
+  <script src="/app.js"></script>
+</body>
+</html>
