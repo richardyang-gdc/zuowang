@@ -88,7 +88,7 @@
   var HU_FADE_AT = CYCLE_MS - 1400;               // 首轮无词时，“呼”陪到触底前一刻才开始淡出
   var PRESS_MS = 900;       // 手动模式长按散去的阈值
 
-  var WORDS = ['松开', '让它流过', '不必抓住', '在此刻', '呼吸'];
+  var WORDS = ['松开', '让它流过', '不必抓住', '在此刻', '只有', '呼吸'];
   var wordIndex = -1;
   var autoMode = true;      // true=自动消散；false=手动长按散去
 
