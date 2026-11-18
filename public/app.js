@@ -75,22 +75,26 @@
   var fsBtn = document.getElementById('fs-toggle');
 
   // 呼吸节奏：吸 4 秒 / 呼 6 秒（每分钟 6 次共振呼吸）
+  // 节拍由绝对时钟驱动：环永远按这个周期走，任何文字出现都不改变它。
   var INHALE_MS = 4000;
   var EXHALE_MS = 6000;
+  var CYCLE_MS = INHALE_MS + EXHALE_MS;          // 10 秒一轮
   var FADE = 1100;          // 与 CSS 文字过渡对齐
-  var WORD_HOLD = 5000;     // 自动模式下核心词停留时长（读完再散）
   var DISSOLVE_MS = 2500;   // 消散时长：文字缓慢渐隐 + 微尘持续下落的窗口
-  var WORD_GAP = 12000;     // 两次核心词之间的呼吸间隔
+  var WORD_AT = INHALE_MS;                        // 核心词在吸气顶点登场（环张到最大那一刻）
+  var WORD_PREPARE_AT = WORD_AT - FADE;           // 吸气末先让“吸”淡出，吸满时环心正好空出来
+  var WORD_DISSOLVE_AT = CYCLE_MS - DISSOLVE_MS;  // 呼气末段起化尘，正好与环触底同时散尽
+  var MANUAL_MAX_MS = CYCLE_MS * 3;               // 手动模式最多停留 3 轮呼吸，之后自己化尘
   var PRESS_MS = 900;       // 手动模式长按散去的阈值
-  var breathPhase = '吸';   // 下一个要显示的阶段
 
   var WORDS = ['松开', '让它流过', '不必抓住', '在此刻', '呼吸'];
   var wordIndex = -1;
   var autoMode = true;      // true=自动消散；false=手动长按散去
 
-  var breathTimer = null;
-  var wordTimer = null;
-  var holdTimer = null;
+  var beatStart = 0;        // 呼吸时钟原点（performance.now）
+  var beatRAF = null;
+  var seg = -1;             // 当前呼吸段：0=吸气 1=呼气前段（词停留） 2=呼气末段（词化尘）
+  var wordBornAt = 0;       // 词登场时刻，手动模式兜底用
   var seepTimer = null;     // 微尘分批渗出的定时器
   var wordActive = false;   // 核心词当前是否占据圆环中心
   var dissipating = false;
@@ -560,12 +564,8 @@
     modeBtn.classList.toggle('manual', !autoMode);
     modeBtn.setAttribute('aria-label', autoMode ? '当前自动模式' : '当前手动模式');
     syncHint(); // 手动模式且核心词正出现时才显示“长按”
-    if (autoMode) {
-      // 切回自动：正在停留的核心词开始倒计时消散
-      if (wordActive && !dissipating) holdTimer = setTimeout(dissipate, WORD_HOLD);
-    } else {
-      clearTimeout(holdTimer); // 改为等待用户长按
-    }
+    // 切回自动时，若已在呼气末段就立刻化尘；否则等下一拍相位自己接管
+    if (autoMode && wordActive && !dissipating && seg === 3) dissipate();
     track(autoMode ? 'mode_auto' : 'mode_manual');
   });
 
@@ -615,60 +615,102 @@
     pressHint.classList.toggle('show', show);
   }
 
-  // 吸 4 秒扩张 / 呼 6 秒收缩，环内文字同步切换，无限循环
-  function breathStep() {
-    if (!started || wordActive) return;
-    var label = breathPhase;
-    var inhaling = label === '吸';
-    breathPhase = inhaling ? '呼' : '吸';
-    ring.classList.toggle('inhale', inhaling);
-    ring.classList.toggle('exhale', !inhaling);
-    setText(label, 'breath');
-    showText();
-    breathTimer = setTimeout(breathStep, inhaling ? INHALE_MS : EXHALE_MS);
-  }
-  function pauseBreath() { clearTimeout(breathTimer); breathTimer = null; }
-  function resumeBreath() { if (!breathTimer && started && !wordActive) breathStep(); }
-  function scheduleWord(delay) { clearTimeout(wordTimer); wordTimer = setTimeout(showWord, delay); }
+  // ---------- 呼吸节拍：绝对时钟驱动，环永不因文字停下 ----------
+  // 相位 p = (now - beatStart) % 10000：0~4000 吸气（环张开），4000~10000 呼气（环收拢）。
+  // 环的位置每帧由相位直接算出，所以词的出现、停留、消散都不可能让它减速或暂停。
+  var RING_MIN = 0.82, RING_MAX = 1.14;
+  var OP_MIN = 0.78, OP_MAX = 1;
 
-  // 核心词进入圆环中心：淡入 → 停留（自动模式倒计时 / 手动模式等长按）
-  function showWord() {
+  function phaseAt(ts) {
+    var d = (ts - beatStart) % CYCLE_MS;
+    return d < 0 ? d + CYCLE_MS : d;
+  }
+
+  // 0 = 最内（呼尽），1 = 最外（吸满）
+  function ringLevel(p) {
+    return p < INHALE_MS ? p / INHALE_MS : 1 - (p - INHALE_MS) / EXHALE_MS;
+  }
+
+  function paintRing(p) {
+    var t = ringLevel(p);
+    ring.style.transform = 'scale(' + (RING_MIN + (RING_MAX - RING_MIN) * t).toFixed(4) + ')';
+    ring.style.opacity = (OP_MIN + (OP_MAX - OP_MIN) * t).toFixed(3);
+  }
+
+  // 核心词登场：踩在吸气顶点上，随后陪用户走完整个呼气
+  function spawnWord(ts) {
     if (!started || wordActive) return;
     wordActive = true;
-    pauseBreath();
-    hideText();
-    setTimeout(function () {
-      if (!started) return;
-      wordIndex = (wordIndex + 1) % WORDS.length;
-      setText(WORDS[wordIndex], 'word');
-      showText();
-      syncHint(); // 核心词出现时，手动模式下显示“长按”
-      if (autoMode) holdTimer = setTimeout(dissipate, WORD_HOLD);
-    }, FADE);
+    wordBornAt = ts;
+    wordIndex = (wordIndex + 1) % WORDS.length;
+    setText(WORDS[wordIndex], 'word');
+    showText();
+    syncHint(); // 手动模式下同时浮出“长按”
   }
 
-  // 散去：文字化微尘、淡出，再回到呼吸循环
+  // 化尘：文字渐隐 + 微尘渗出，2.5s 后正好与环触底重合
   function dissipate() {
     if (!wordActive || dissipating) return;
     dissipating = true;
     syncHint(); // 开始消散即隐藏“长按”，避免提示悬在渐隐文字下
-    clearTimeout(holdTimer);
     cancelPress();
     dissolveWord();
     track('dissipate_done');
     textMain.classList.add('dissolving');
-    setTimeout(function () {
-      clearInterval(seepTimer); seepTimer = null; dissolveOrigin = null;
-      textMain.classList.remove('dissolving');
-      hideText();
-      setTimeout(function () {
-        wordActive = false;
-        dissipating = false;
-        syncHint();
-        resumeBreath();
-        scheduleWord(WORD_GAP);
-      }, FADE);
-    }, DISSOLVE_MS); // 2.5s 缓慢渐隐，微尘同步持续下落
+  }
+
+  // 收尾统一交给相位边界，不再用 settimeout 追着呼吸跑
+  function clearWord() {
+    clearInterval(seepTimer); seepTimer = null;
+    dissolveOrigin = null;
+    textMain.classList.remove('dissolving');
+    wordActive = false;
+    dissipating = false;
+    syncHint();
+  }
+
+  function enterSeg(s, ts) {
+    if (s === 0) {
+      // 吸气：手动模式下词还在等长按，就把环心让给它——环照常张开
+      if (wordActive && !dissipating && !autoMode) return;
+      if (wordActive) clearWord();
+      setText('吸', 'breath');
+      showText();
+      return;
+    }
+    if (s === 1) {
+      // 吸气最后 1.1s：让“吸”先淡出，环吸满时环心正好是空的
+      if (!wordActive) hideText();
+      return;
+    }
+    if (s === 2) {
+      // 吸气顶点：词淡入，陪用户走完整个呼气；首轮雾未散时不打扰，只留呼吸
+      if (!wordActive && state === 'hold') spawnWord(ts);
+      return;
+    }
+    // 呼气末段：自动模式随环收拢化尘；手动模式等长按，超过三轮由兜底处理
+    if (autoMode) dissipate();
+  }
+
+  function beatTick(ts) {
+    beatRAF = requestAnimationFrame(beatTick);
+    if (!started) return;
+    var p = phaseAt(ts);
+    paintRing(p); // 环只认相位，任何文字状态都不影响这一行
+
+    var s = p < WORD_PREPARE_AT ? 0
+          : p < INHALE_MS ? 1
+          : p < WORD_DISSOLVE_AT ? 2 : 3;
+    if (s !== seg) { seg = s; enterSeg(s, ts); }
+
+    // 手动模式兜底：一直没人长按，三轮呼吸后自己化尘
+    if (wordActive && !dissipating && !autoMode && ts - wordBornAt >= MANUAL_MAX_MS) dissipate();
+  }
+
+  function startBeat() {
+    beatStart = performance.now();
+    seg = -1;
+    if (!beatRAF) beatRAF = requestAnimationFrame(beatTick);
   }
 
   // 手动模式：长按圆环中心文字使其散去（无进度环，只做柔和模糊淡出）
@@ -712,19 +754,16 @@
     state = 'breath';
     switchStage(null, stageBreath);
     hideText(); // “轻触开始”淡出
-    setTimeout(function () {
-      breathPhase = '吸';
-      breathStep();
-    }, FADE);
+    setTimeout(startBeat, FADE); // 等提示淡尽再起拍，之后节拍不再被任何东西打断
 
-    // 一轮完整呼吸（10s）后雾散，山谷浮现；呼吸与核心词继续自动循环
+    // 一整轮呼吸（10s）后雾散、山谷浮现，且正好落在吸气起点上
     setTimeout(function () {
       state = 'hold';
       switchStage(stageBreath, stageHold);
       valley.classList.add('show');
       if (!fogReported) { fogReported = true; track('fog_revealed'); }
-      scheduleWord(6000); // 山谷浮现 6s 后出现第一个核心词
-    }, 10000);
+      // 不再单独排“第一个词”：词只在吸气顶点登场，相位会自己送到
+    }, FADE + CYCLE_MS);
   }
 
   // ---------- 交互绑定 ----------
