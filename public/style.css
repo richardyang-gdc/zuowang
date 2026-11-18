@@ -105,7 +105,7 @@ body {
 @keyframes drift { from { transform: translateX(-4%); } to { transform: translateX(4%); } }
 
 /* ---- 右上角开关（模式 + 声音）---- */
-#sound-toggle, #mode-toggle {
+#sound-toggle, #mode-toggle, #fs-toggle {
   position: fixed; z-index: 5; top: 18px;
   width: 38px; height: 38px; border-radius: 50%;
   border: 1px solid rgba(208,200,188,.18); background: rgba(28,25,22,.5);
@@ -114,7 +114,17 @@ body {
 }
 #sound-toggle { right: 18px; }
 #mode-toggle { right: 64px; }
+/* 全屏按钮：紧邻模式键左侧，等距排列；退出态换成向内的四角 */
+#fs-toggle { right: 110px; }
+#fs-toggle .ico-exit { display: none; }
+html.is-fullscreen #fs-toggle .ico-enter { display: none; }
+html.is-fullscreen #fs-toggle .ico-exit { display: block; }
 #sound-toggle.muted { color: rgba(218,212,202,.28); }
+/* 全屏态：让控件避开状态栏／刘海安全区（非全屏保持原位置不变） */
+html.is-fullscreen #sound-toggle,
+html.is-fullscreen #mode-toggle,
+html.is-fullscreen #fs-toggle { top: calc(18px + env(safe-area-inset-top)); }
+html.is-fullscreen #volume-wrap { top: calc(66px + env(safe-area-inset-top)); }
 /* 手动模式激活（默认自动；点亮表示"需手动长按"） */
 #mode-toggle.manual { color: rgba(236,222,190,.95); border-color: rgba(214,190,140,.55); background: rgba(66,56,38,.6); }
 

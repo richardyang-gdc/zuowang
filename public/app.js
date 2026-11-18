@@ -72,6 +72,7 @@
   var volumeWrap = document.getElementById('volume-wrap');
   var volumeRange = document.getElementById('volume-range');
   var modeBtn = document.getElementById('mode-toggle');
+  var fsBtn = document.getElementById('fs-toggle');
 
   // 呼吸节奏：吸 4 秒 / 呼 6 秒（每分钟 6 次共振呼吸）
   var INHALE_MS = 4000;
@@ -104,11 +105,20 @@
   var particles = [];
   var W = 0, H = 0, DPR = 1;
   function resize() {
+    var prevW = W, prevH = H;
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth; H = window.innerHeight;
     canvas.width = W * DPR; canvas.height = H * DPR;
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    // 全屏切换或旋转后按比例搬移已有微尘，避免它们挤在旧尺寸的范围内
+    if (prevW && prevH && (prevW !== W || prevH !== H)) {
+      var sx = W / prevW, sy = H / prevH;
+      for (var i = 0; i < particles.length; i++) {
+        particles[i].x *= sx;
+        particles[i].y *= sy;
+      }
+    }
   }
   resize();
   window.addEventListener('resize', resize);
@@ -559,6 +569,38 @@
     track(autoMode ? 'mode_auto' : 'mode_manual');
   });
 
+  // ---------- 全屏：支持就给按钮，不支持（iOS Safari / 微信 iOS）就藏起来 ----------
+  var fsRoot = document.documentElement;
+  var fsRequest = fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen;
+  var fsExit = document.exitFullscreen || document.webkitExitFullscreen;
+
+  function fsElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function syncFsUI() {
+    var on = !!fsElement();
+    fsRoot.classList.toggle('is-fullscreen', on);
+    if (fsBtn) fsBtn.setAttribute('aria-label', on ? '退出全屏' : '全屏');
+    requestAnimationFrame(resize); // 浏览器工具栏收起/展开，画布需重新量尺寸
+  }
+
+  if (fsBtn) {
+    if (fsRequest) {
+      fsBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        closeVolumePanel();
+        unlockAudio(); // 顺手借这次手势解锁音频，微信里少一次试错
+        var p = fsElement() ? (fsExit && fsExit.call(document)) : fsRequest.call(fsRoot);
+        if (p && p.catch) p.catch(function () {}); // 被 WebView 拒绝时静默，不弹错误
+      });
+    } else {
+      fsBtn.style.display = 'none'; // 没有全屏能力就不留一个没反应的按钮
+    }
+  }
+  document.addEventListener('fullscreenchange', syncFsUI);
+  document.addEventListener('webkitfullscreenchange', syncFsUI);
+
   // ---------- 圆环中心文字控制 ----------
   function setText(txt, kind) {
     textMain.className = 'text-main is-' + kind + (kind === 'word' ? ' sinking' : '');
@@ -694,7 +736,7 @@
   }
 
   function onPressDown(e) {
-    if (e.target && e.target.closest && e.target.closest('#volume-wrap, #sound-toggle')) return;
+    if (e.target && e.target.closest && e.target.closest('#volume-wrap, #sound-toggle, #fs-toggle')) return;
     if (e.target && e.target.closest && e.target.closest('#mode-toggle')) {
       closeVolumePanel();
       return;
