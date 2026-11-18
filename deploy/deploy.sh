@@ -78,7 +78,11 @@ if [ "$GENERATED" -eq 1 ] || [ -n "${ADMIN_PASS:-}" ]; then
 fi
 
 echo "==> [4/6] 修复权限并安装 systemd 服务"
-chown -R zuowang:zuowang "$ROOT"
+# 代码目录保持 root 所有，避免 root 执行 git pull 时触发 dubious ownership；
+# 只把运行时需要写/读的 data/ 与 .env 交给 zuowang。
+chown -R zuowang:zuowang "$ROOT/data"
+chown zuowang:zuowang "$ENV_FILE"
+chmod 600 "$ENV_FILE"
 cp "$ROOT/deploy/$SERVICE" "/etc/systemd/system/$SERVICE"
 systemctl daemon-reload
 systemctl enable "$SERVICE" >/dev/null 2>&1 || true

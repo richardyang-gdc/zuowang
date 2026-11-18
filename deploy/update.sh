@@ -14,7 +14,12 @@ git -C "$APP_DIR" reset --hard origin/main
 echo "==> 修复权限（数据文件不会被 git 覆盖）"
 mkdir -p "$APP_DIR/data"
 touch "$APP_DIR/data/visits.jsonl"
-chown -R zuowang:zuowang "$APP_DIR"
+# 只改运行时目录，代码目录保持 root，避免 git pull 出现 dubious ownership
+chown -R zuowang:zuowang "$APP_DIR/data"
+if [ -f "$APP_DIR/.env" ]; then
+  chown zuowang:zuowang "$APP_DIR/.env"
+  chmod 600 "$APP_DIR/.env"
+fi
 
 echo "==> 重启服务"
 systemctl restart "$SERVICE"
