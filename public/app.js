@@ -230,7 +230,14 @@
   var masterGain = null;
   var audioReady = false;
   var audioLevelUp = false;  // 是否已把音量淡上来过（首次入场用更长的淡入）
-  var audioSilent = false;   // 是否被我们主动收到 0（切后台 / 息屏）
+  var audioSilent = false;   // 当前输出是否被我们收到 0
+  var wantAudible = false;   // 用户此刻“应该听见声音”——由可见/聚焦/触摸置真，切后台置假。
+                             // 不再用 visibilityState 判断：部分 WebView 息屏后一直报 hidden，
+                             // 会把恢复路径彻底锁死（这正是“亮屏后再也打不开声音”的原因）。
+  var audioSuspect = false;  // 上下文疑似已死（在跑时钟不走 / 一直 suspended）
+  var audioGen = 0;          // 每次重建 +1，用来丢弃旧上下文的迟到回调
+  var audioProbe = null;
+  var lastRebuild = 0;
   var MAX_GAIN = 0.7;        // 滑杆拉满时的主增益
   var VOL_KEY = 'zw_volume';
   function loadVolume() {
@@ -283,8 +290,11 @@
 
     audioReady = true;
     audioCtx.onstatechange = function () {
+      if (!audioCtx) return;
       // iOS 被系统打断后自行恢复、或 resume() 迟到兑现，都在这里把音量接回来
-      if (audioCtx && audioCtx.state === 'running') resumeLevel();
+      if (audioCtx.state === 'running') resumeLevel();
+      // Safari 专有的 interrupted 状态：硬件已经停了，标脏，下次手势/探测时重建
+      else if (audioCtx.state === 'interrupted') audioSuspect = true;
     };
     scheduleBowl();
     return true;
@@ -305,10 +315,12 @@
 
   // 上下文一旦跑起来，就把电平摆回该有的位置。
   // 这里**不能设“只做一次”的锁**：息屏回来、系统打断恢复，都要靠它把声音接回来。
+  // 判定用 wantAudible 这个“意图”，而不是 visibilityState：
+  // 有的 WebView 息屏后就一直报 hidden，用 visibilityState 会把恢复路径彻底锁死。
   function resumeLevel() {
     if (!audioCtx || !masterGain || !started) return;
     if (audioCtx.state !== 'running') return;
-    if (document.visibilityState !== 'visible') return;
+    if (!wantAudible) return;
     if (volume <= 0) { approachGain(0, 0.02); audioSilent = true; return; }
     if (!audioLevelUp) {
       audioLevelUp = true;
@@ -319,10 +331,55 @@
     audioSilent = false;
   }
 
+  // iOS 在息屏 / 来电打断之后，AudioContext 常常“看起来还活着，其实已经不渲染了”：
+  // state 仍是 running，currentTime 却不走，resume() 也永远不兑现。这种上下文救不回来，
+  // 只能整套重建（用户遇到的就是“亮屏后怎么点都没声，只有刷新才好”）。
+  function rebuildAudio() {
+    // 2.5s 内只重建一次，避免连续触摸反复造上下文
+    var now = Date.now();
+    if (now - lastRebuild < 2500 && audioCtx) return false;
+    lastRebuild = now;
+    var old = audioCtx;
+    audioGen++;
+    audioCtx = null; masterGain = null; audioReady = false;
+    audioLevelUp = false; audioSilent = true; audioSuspect = false;
+    if (old) {
+      try { old.onstatechange = null; } catch (e) {}
+      try { old.close(); } catch (e2) {}
+    }
+    if (!ensureAudioCtx() || !audioCtx) return true;
+    try {
+      var p = audioCtx.resume();
+      if (p && typeof p.then === 'function') p.then(resumeLevel).catch(function () {});
+      else resumeLevel();
+    } catch (e) {}
+    startRecovery();
+    return true;
+  }
+
+  // 900ms 后回看音频时钟有没有真的走动：不动就判定上下文已死，直接重建。
+  // 这是唯一能识别“running 但不出声”的手段。
+  function probeAudio() {
+    clearTimeout(audioProbe);
+    if (!audioCtx || !started) return;
+    var gen = audioGen, t0 = audioCtx.currentTime;
+    audioProbe = setTimeout(function () {
+      if (gen !== audioGen || !audioCtx || !wantAudible) return;
+      if (audioCtx.state !== 'running' || audioCtx.currentTime - t0 < 0.15) {
+        audioSuspect = true;
+        // 20s 内只自动重建一次：真的一直起不来时宁可等用户一碰再重建，
+        // 别每 8 秒造一个新上下文（iOS 对同时存在的上下文数量有限制）
+        if (Date.now() - lastRebuild > 20000) rebuildAudio();
+      }
+    }, 900);
+  }
+
   // 微信/iOS 的音频解锁：必须在真实手势里 resume；失败时等下一次手势重试。
   function unlockAudio() {
+    wantAudible = true;           // 手指碰了，就当他此刻在听
     if (!ensureAudioCtx() || !audioCtx) return;
-    if (audioCtx.state === 'running') { resumeLevel(); return; }
+    if (audioSuspect && rebuildAudio()) return;  // 手指这一刻重建，iOS 才肯放行
+    if (audioCtx.state === 'running') { resumeLevel(); probeAudio(); return; }
     // 不设“正在恢复”锁：iOS 上 touchstart 的 resume 可能一直 pending，
     // touchend/click 需要能再次尝试；resume() 本身是幂等的。
     try {
@@ -330,15 +387,16 @@
       if (p && typeof p.then === 'function') p.then(resumeLevel).catch(function () {});
       else resumeLevel();
     } catch (e) {}
+    probeAudio();
   }
 
   // 息屏 / 切后台：只把输出按到零，**绝不 suspend**。
-  // 挂起之后 iOS 不给用户手势就不许 resume()，于是就出现“亮屏了但没声音，
-  // 非得点一下音量/声音按钮”。而按到零既能让硬件断电时听不到断点（不「吱」），
-  // 又保留了上下文，亮屏回来 resume() 或 onstatechange 就能直接把音量接上。
-  // tau=0.004 → 约 20ms 收敛到近乎无声，比之前 80ms 的线性淡出快得多，
-  // 赶得上锁屏瞬间的音频中断。
+  // 挂起之后 iOS 不给用户手势就不许 resume()，于是就出现“亮屏了但没声音”。
+  // 按到零既能让硬件断电时听不到断点（不「吱」），又保留了上下文。
+  // tau=0.004 → 约 20ms 收敛到近乎无声，赶得上锁屏瞬间的音频中断。
   function quietAudio() {
+    wantAudible = false;
+    clearTimeout(audioProbe);
     if (!audioCtx || !masterGain) return;
     approachGain(0, 0.004);
     // 50ms 后再硬归一到 0：断点一定落在零电平上，不会留一丝残余
@@ -351,14 +409,16 @@
 
   function wakeAudio() {
     if (!audioCtx || !started) return;
+    wantAudible = true;
     audioSilent = true;          // 先按“现在是静的”处理，resumeLevel 才会补淡入
-    if (audioCtx.state === 'running') { resumeLevel(); return; }
+    if (audioCtx.state === 'running') { resumeLevel(); probeAudio(); return; }
     try {
       var p = audioCtx.resume();
       if (p && typeof p.then === 'function') p.then(resumeLevel).catch(function () {});
       else resumeLevel();
     } catch (e) {}
     startRecovery();             // 被拒就在随后十几秒里继续试，不必等用户点东西
+    probeAudio();                // 900ms 后若时钟仍不走，直接重建
   }
 
   // 亮屏后上下文若还没起来（iOS 拒绝无手势的 resume），在有限时间内持续重试。
@@ -368,7 +428,7 @@
     if (recoveryTimer) return;
     var tries = 0;
     recoveryTimer = setInterval(function () {
-      if (++tries > 20 || document.visibilityState !== 'visible') {
+      if (++tries > 20 || !wantAudible) {
         clearInterval(recoveryTimer); recoveryTimer = null; return;
       }
       if (!audioCtx) { clearInterval(recoveryTimer); recoveryTimer = null; return; }
@@ -567,14 +627,24 @@
   document.addEventListener('freeze', function () { quietAudio(); }); // 页面被系统冻结前也先静音
   // 锁屏 / 来电 / 切应用时，blur 往往比 visibilitychange 更早到，多抢几十毫秒的淡出时间
   window.addEventListener('blur', function () { quietAudio(); });
-  window.addEventListener('focus', function () {
-    if (document.visibilityState === 'visible') wakeAudio();
-  });
+  // 回到前台：不依赖 visibilityState —— 有的 WebView 息屏后会一直报 hidden
+  window.addEventListener('focus', function () { wakeAudio(); });
   window.addEventListener('pageshow', function (e) {
-    if (!e.persisted) return;
-    if (awakeWanted) keepAwake();
+    if (e.persisted && awakeWanted) keepAwake();
     wakeAudio();
   });
+
+  // 心跳自愈：万一可见/聚焦事件都没送达（部分 WebView 会漏），
+  // 每 8 秒看一眼——真的回到前台却没声就补一次，时钟不走就重建。健康时什么也不做。
+  setInterval(function () {
+    if (!started) return;
+    if (!wantAudible) {
+      // 只有确实在台前（可见且拿到焦点）才补，避免把失焦静音又打开
+      if (document.visibilityState === 'visible' && document.hasFocus()) wakeAudio();
+      return;
+    }
+    probeAudio();
+  }, 8000);
 
   function playBowl() {
     if (!audioReady || volume <= 0 || !audioCtx || audioCtx.state !== 'running') return;
@@ -609,6 +679,7 @@
   // ---------- 右上角开关与音量 ----------
   function applyVolume(animate) {
     if (!ensureAudioCtx() || !masterGain || !audioCtx) return;
+    wantAudible = true;          // 正在拖滑杆，说明他此刻在听
     if (audioCtx.state !== 'running') {
       unlockAudio(); // 拖动音量也是用户手势，顺手补一次解锁
       return;
