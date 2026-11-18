@@ -324,6 +324,156 @@
   }
   setupAudioUnlock();
 
+  // ---------- 屏幕常亮：坐忘进行中不让手机自动息屏 ----------
+  // 首选标准 Screen Wake Lock，但它要求安全上下文（HTTPS/localhost），
+  // 且微信 WebView 多半不提供；因此兜底用「内联静音循环视频」——让系统
+  // 认为有媒体在播放，从而不触发自动锁屏（NoSleep 的经典做法）。
+  // 视频 1877 字节（2×2、1 秒、无音轨），base64 内联，不产生额外请求。
+  var SILENT_MP4 =
+    'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAOcbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAA' +
+    'AQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+    'AAAAAgAAAsd0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAA' +
+    'AAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAIAAAACAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAI/' +
+    'bWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAA8AAAAPABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRl' +
+    'b0hhbmRsZXIAAAAB6m1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAA' +
+    'AQAAAapzdGJsAAAAunN0c2QAAAAAAAAAAQAAAKphdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAIAAgBIAAAASAAAAAAA' +
+    'AAABFUxhdmM2Mi4xMS4xMDAgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAAMGF2Y0MBQsAe/+EAGGdCwB7ZH4iIwEQAAAMABAAA' +
+    'AwDwPFi5IAEABWjLg8sgAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAHEgAAAAAAAAAGHN0dHMAAAAAAAAAAQAAAB4A' +
+    'AAIAAAAAFHN0c3MAAAAAAAAAAQAAAAEAAAAcc3RzYwAAAAAAAAABAAAAAQAAAB4AAAABAAAAjHN0c3oAAAAAAAAAAAAAAB4A' +
+    'AAKDAAAACQAAAAoAAAAJAAAACQAAAAkAAAAJAAAACQAAAAkAAAAJAAAACQAAAAkAAAAJAAAACQAAAAkAAAAJAAAACQAAAAkA' +
+    'AAAJAAAACQAAAAkAAAAJAAAACQAAAAkAAAAJAAAACQAAAAkAAAAJAAAACQAAAAkAAAAUc3RjbwAAAAAAAAABAAADzAAAAGF1' +
+    'ZHRhAAAAWW1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALGlsc3QAAAAkqXRvbwAAABxkYXRh' +
+    'AAAAAQAAAABMYXZmNjIuMy4xMDAAAAAIZnJlZQAAA5FtZGF0AAACcQYF//9t3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3Jl' +
+    'IDE2NSByMzIyMiBiMzU2MDVhIC0gSC4yNjQvTVBFRy00IEFWQyBjb2RlYyAtIENvcHlsZWZ0IDIwMDMtMjAyNSAtIGh0dHA6' +
+    'Ly93d3cudmlkZW9sYW4ub3JnL3gyNjQuaHRtbCAtIG9wdGlvbnM6IGNhYmFjPTAgcmVmPTMgZGVibG9jaz0xOjA6MCBhbmFs' +
+    'eXNlPTB4MToweDExMSBtZT1oZXggc3VibWU9NyBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3Jhbmdl' +
+    'PTE2IGNocm9tYV9tZT0xIHRyZWxsaXM9MSA4eDhkY3Q9MCBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hy' +
+    'b21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVj' +
+    'aW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0wIHdlaWdo' +
+    'dHA9MCBrZXlpbnQ9MjUwIGtleWludF9taW49MjUgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00' +
+    'MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlv' +
+    'PTEuNDAgYXE9MToxLjAwAIAAAAAKZYiEC/JigACrzgAAAAVBmjgX6gAAAAZBmlQF+oAAAAAFQZpgL9QAAAAFQZqAL9QAAAAF' +
+    'QZqgL9QAAAAFQZrAL9QAAAAFQZrgL9QAAAAFQZsAL9QAAAAFQZsgL9QAAAAFQZtAL9QAAAAFQZtgL9QAAAAFQZuAL9QAAAAF' +
+    'QZugL9QAAAAFQZvAL9QAAAAFQZvgL9QAAAAFQZoAL9QAAAAFQZogL9QAAAAFQZpAL9QAAAAFQZpgL9QAAAAFQZqAL9QAAAAF' +
+    'QZqgL9QAAAAFQZrAL9QAAAAFQZrgL9QAAAAFQZsAL9QAAAAFQZsgL9QAAAAFQZtAL9QAAAAFQZtgL9QAAAAFQZuAK9QAAAAF' +
+    'QZugJ9Q=';
+
+  var awakeWanted = false;   // 用户是否正处于坐忘体验中（希望常亮）
+  var wakeSentinel = null;
+  var wakePending = false;   // 申请中：避免多个手势重复 request
+  var silentVideo = null;
+
+  function startSilentVideo() {
+    if (silentVideo) {
+      var again = silentVideo.play();
+      if (again && again.catch) again.catch(function () {});
+      return;
+    }
+    try {
+      var v = document.createElement('video');
+      v.setAttribute('playsinline', '');
+      v.setAttribute('webkit-playsinline', '');
+      v.setAttribute('muted', '');
+      v.setAttribute('loop', '');
+      v.setAttribute('aria-hidden', 'true');
+      v.muted = true;
+      v.loop = true;
+      v.playsInline = true;
+      v.preload = 'auto';
+      v.src = SILENT_MP4;
+      // 不能 display:none / visibility:hidden，否则部分内核会停掉解码。
+      // 用 2×2、极低不透明度放在左下角：视觉不可见，但仍在渲染树里播放。
+      v.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:.01;pointer-events:none;z-index:-1;';
+      document.body.appendChild(v);
+      silentVideo = v;
+      var p = v.play();
+      if (p && typeof p.then === 'function') {
+        p.catch(function () { /* 手势不足时元素保留，下一次手势/回到前台再试 */ });
+      }
+    } catch (e) {
+      silentVideo = null;
+    }
+  }
+
+  function stopSilentVideo() {
+    if (!silentVideo) return;
+    try {
+      silentVideo.pause();
+      silentVideo.removeAttribute('src');
+      silentVideo.load();
+      if (silentVideo.parentNode) silentVideo.parentNode.removeChild(silentVideo);
+    } catch (e) {}
+    silentVideo = null;
+  }
+
+  function keepAwake() {
+    awakeWanted = true;
+    if (!started) return;
+    if (wakeSentinel || wakePending) return;   // 已有锁或正在申请，不重复
+    if (navigator.wakeLock && typeof navigator.wakeLock.request === 'function') {
+      wakePending = true;
+      try {
+        navigator.wakeLock.request('screen').then(function (sentinel) {
+          wakePending = false;
+          if (!awakeWanted) {        // 申请期间页面已隐藏，直接退回
+            try { sentinel.release(); } catch (e) {}
+            return;
+          }
+          wakeSentinel = sentinel;
+          sentinel.addEventListener('release', function () {
+            wakeSentinel = null;   // 系统可能因切后台/省电收回，回前台会重新申请
+          });
+          stopSilentVideo();       // 原生锁生效，就不需要视频兜底了
+        }).catch(function () {
+          wakePending = false;
+          startSilentVideo();      // 非 HTTPS / 无权限 / 省电模式 → 降级
+        });
+        return;
+      } catch (e) {
+        wakePending = false;
+      }
+    }
+    startSilentVideo();
+  }
+
+  function stopAwake(clearIntent) {
+    if (clearIntent) awakeWanted = false;
+    wakePending = false;
+    if (wakeSentinel) {
+      try { wakeSentinel.release(); } catch (e) {}
+      wakeSentinel = null;
+    }
+    stopSilentVideo();
+  }
+
+  // 视频被暂停（手势不足、系统策略）时，在下一次手势里补一次
+  function retryAwake() {
+    if (!awakeWanted || wakeSentinel) return;
+    if (silentVideo) {
+      if (silentVideo.paused) {
+        var p = silentVideo.play();
+        if (p && p.catch) p.catch(function () {});
+      }
+      return;
+    }
+    keepAwake();
+  }
+
+  window.addEventListener('touchstart', retryAwake, { passive: true });
+  window.addEventListener('click', retryAwake);
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') {
+      if (awakeWanted) keepAwake();          // 切回来重新申请
+    } else {
+      stopAwake(false);                      // 后台先放开，省电；意图保留
+    }
+  });
+  window.addEventListener('pagehide', function () { stopAwake(false); });
+  window.addEventListener('pageshow', function (e) {
+    if (e.persisted && awakeWanted) keepAwake();
+  });
+
   function playBowl() {
     if (!audioReady || volume <= 0 || !audioCtx || audioCtx.state !== 'running') return;
     var now = audioCtx.currentTime;
@@ -515,6 +665,7 @@
     started = true;
     // 必须尽早、且在真实手势里解锁；不要先跑 1000 个粒子再初始化音频。
     unlockAudio();
+    keepAwake();   // 坐忘期间保持屏幕常亮，避免深呼吸到一半黑屏
     spawnMotes(1000);
     state = 'breath';
     switchStage(null, stageBreath);
