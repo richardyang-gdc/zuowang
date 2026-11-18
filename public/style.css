@@ -113,14 +113,24 @@ body {
 /* 全屏按钮：紧邻模式键左侧，等距排列；退出态换成向内的四角 */
 #fs-toggle { right: 110px; }
 #fs-toggle .ico-exit { display: none; }
-html.is-fullscreen #fs-toggle .ico-enter { display: none; }
-html.is-fullscreen #fs-toggle .ico-exit { display: block; }
+html.is-fullscreen #fs-toggle .ico-enter,
+html.is-immersive #fs-toggle .ico-enter { display: none; }
+html.is-fullscreen #fs-toggle .ico-exit,
+html.is-immersive #fs-toggle .ico-exit { display: block; }
 #sound-toggle.muted { color: rgba(218,212,202,.28); }
 /* 全屏态：让控件避开状态栏／刘海安全区（非全屏保持原位置不变） */
 html.is-fullscreen #sound-toggle,
 html.is-fullscreen #mode-toggle,
 html.is-fullscreen #fs-toggle { top: calc(18px + env(safe-area-inset-top)); }
 html.is-fullscreen #volume-wrap { top: calc(66px + env(safe-area-inset-top)); }
+
+/* 沉浸模式：iPhone 的 Safari 与微信内核都没有元素级全屏 API（地址栏由系统绘制，
+   网页无权隐藏），按钮降级为「收起自身控件，只剩呼吸」。轻触屏幕唤回控件。 */
+html.is-immersive { overscroll-behavior: none; }
+html.is-immersive:not(.ui-awake) #fs-toggle,
+html.is-immersive:not(.ui-awake) #mode-toggle,
+html.is-immersive:not(.ui-awake) #sound-toggle,
+html.is-immersive:not(.ui-awake) #volume-wrap { opacity: 0; pointer-events: none; }
 /* 手动模式激活（默认自动；点亮表示"需手动长按"） */
 #mode-toggle.manual { color: rgba(236,222,190,.95); border-color: rgba(214,190,140,.55); background: rgba(66,56,38,.6); }
 

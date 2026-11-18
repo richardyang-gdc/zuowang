@@ -570,7 +570,9 @@
     track(autoMode ? 'mode_auto' : 'mode_manual');
   });
 
-  // ---------- 全屏：支持就给按钮，不支持（iOS Safari / 微信 iOS）就藏起来 ----------
+  // ---------- 全屏 / 沉浸模式 ----------
+  // 有元素级全屏 API 就用它（Android 浏览器、桌面）；iPhone 的 Safari 与微信内核都没有这个能力，
+  // 地址栏由系统绘制、网页无权隐藏，于是同一枚按钮降级为「沉浸模式」：收起自身控件，只剩呼吸。
   var fsRoot = document.documentElement;
   var fsRequest = fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen;
   var fsExit = document.exitFullscreen || document.webkitExitFullscreen;
@@ -578,26 +580,51 @@
   function fsElement() {
     return document.fullscreenElement || document.webkitFullscreenElement || null;
   }
+  function immersiveOn() { return fsRoot.classList.contains('is-immersive'); }
 
+  // 图标与无障碍文案只认「是否处于沉浸态」，真全屏与伪全屏共用一套
   function syncFsUI() {
-    var on = !!fsElement();
-    fsRoot.classList.toggle('is-fullscreen', on);
+    var on = !!fsElement() || immersiveOn();
+    fsRoot.classList.toggle('is-fullscreen', !!fsElement());
     if (fsBtn) fsBtn.setAttribute('aria-label', on ? '退出全屏' : '全屏');
-    requestAnimationFrame(resize); // 浏览器工具栏收起/展开，画布需重新量尺寸
+    requestAnimationFrame(resize); // 工具栏收起/展开、控件进出，画布都要重新量尺寸
+  }
+
+  function enterImmersive() {
+    if (immersiveOn()) return;
+    closeVolumePanel();
+    fsRoot.classList.add('is-immersive');
+    syncFsUI();
+  }
+  function exitImmersive() {
+    if (!immersiveOn()) return;
+    fsRoot.classList.remove('is-immersive', 'ui-awake');
+    syncFsUI();
+  }
+  // 沉浸态下轻触屏幕把控件唤回来，否则用户找不到退出的地方
+  function wakeControls() {
+    if (immersiveOn() && !fsRoot.classList.contains('ui-awake')) fsRoot.classList.add('ui-awake');
   }
 
   if (fsBtn) {
-    if (fsRequest) {
-      fsBtn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        closeVolumePanel();
-        unlockAudio(); // 顺手借这次手势解锁音频，微信里少一次试错
-        var p = fsElement() ? (fsExit && fsExit.call(document)) : fsRequest.call(fsRoot);
-        if (p && p.catch) p.catch(function () {}); // 被 WebView 拒绝时静默，不弹错误
-      });
-    } else {
-      fsBtn.style.display = 'none'; // 没有全屏能力就不留一个没反应的按钮
-    }
+    fsBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      closeVolumePanel();
+      unlockAudio(); // 顺手借这次手势解锁音频，微信里少一次试错
+      if (fsElement()) { // 已在真全屏：退出
+        var out = fsExit && fsExit.call(document);
+        if (out && out.catch) out.catch(function () {});
+        return;
+      }
+      // 已在沉浸态就退出——不能因为「本机有 API」又去请求一次被拒的真全屏，否则永远退不出来
+      if (immersiveOn()) { exitImmersive(); return; }
+      if (fsRequest) { // 有 API 就先试真全屏；被 WebView 拒绝时降级，而不是点了没反应
+        var p = fsRequest.call(fsRoot);
+        if (p && p.catch) p.catch(function () { enterImmersive(); });
+        return;
+      }
+      enterImmersive(); // iPhone：只能降级
+    });
   }
   document.addEventListener('fullscreenchange', syncFsUI);
   document.addEventListener('webkitfullscreenchange', syncFsUI);
@@ -792,6 +819,7 @@
       return;
     }
     closeVolumePanel();
+    wakeControls(); // 沉浸态下先点屏幕，控件就回来
     if (!started) { begin(); return; }
     if (!autoMode && wordActive && !dissipating) {
       pressing = true;
