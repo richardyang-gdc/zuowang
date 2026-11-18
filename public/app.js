@@ -69,6 +69,8 @@
   var textMain = document.getElementById('text-main');
   var pressHint = document.getElementById('press-hint');
   var soundBtn = document.getElementById('sound-toggle');
+  var volumeWrap = document.getElementById('volume-wrap');
+  var volumeRange = document.getElementById('volume-range');
   var modeBtn = document.getElementById('mode-toggle');
 
   // 呼吸节奏：吸 4 秒 / 呼 6 秒（每分钟 6 次共振呼吸）
@@ -212,7 +214,16 @@
   var audioCtx = null;
   var masterGain = null;
   var audioReady = false;
-  var muted = false;
+  var MAX_GAIN = 0.7;        // 滑杆拉满时的主增益
+  var VOL_KEY = 'zw_volume';
+  function loadVolume() {
+    try {
+      var v = parseFloat(localStorage.getItem(VOL_KEY));
+      if (!isNaN(v) && v >= 0 && v <= 1) return v;
+    } catch (e) {}
+    return 0.72;             // 默认约等于原先的 0.5 增益
+  }
+  var volume = loadVolume(); // 0..1，滑到底为 0（静音）
   var bowlTimer = null;
 
   function initAudio() {
@@ -253,7 +264,7 @@
   }
 
   function playBowl() {
-    if (!audioReady || muted || !audioCtx) return;
+    if (!audioReady || volume <= 0 || !audioCtx) return;
     var now = audioCtx.currentTime;
     var base = 180 + Math.random() * 60;
     var partials = [1, 2.01, 3.03, 4.2];
@@ -288,19 +299,44 @@
     if (audioCtx.state === 'suspended') audioCtx.resume();
     masterGain.gain.cancelScheduledValues(audioCtx.currentTime);
     masterGain.gain.setValueAtTime(masterGain.gain.value, audioCtx.currentTime);
-    masterGain.gain.linearRampToValueAtTime(muted ? 0 : 0.5, audioCtx.currentTime + 2.5);
+    masterGain.gain.linearRampToValueAtTime(volume * MAX_GAIN, audioCtx.currentTime + 2.5);
   }
 
-  // ---------- 右上角开关 ----------
+  // ---------- 右上角开关与音量 ----------
+  function applyVolume(animate) {
+    if (!masterGain || !audioCtx) return;
+    var target = volume * MAX_GAIN;
+    var now = audioCtx.currentTime;
+    masterGain.gain.cancelScheduledValues(now);
+    masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+    masterGain.gain.linearRampToValueAtTime(target, now + (animate ? 0.12 : 0.01));
+    soundBtn.classList.toggle('muted', volume <= 0);
+  }
+
+  function syncVolumeUI() {
+    volumeRange.value = String(Math.round(volume * 100));
+    soundBtn.classList.toggle('muted', volume <= 0);
+  }
+  syncVolumeUI();
+
+  // 点声音图标：展开/收起竖向音量滑杆（不再直接静音）
   soundBtn.addEventListener('click', function (e) {
     e.stopPropagation();
-    initAudio();
-    muted = !muted;
-    soundBtn.classList.toggle('muted', muted);
-    if (masterGain && audioCtx) {
-      masterGain.gain.linearRampToValueAtTime(muted ? 0 : 0.5, audioCtx.currentTime + 0.4);
-    }
+    var showing = volumeWrap.classList.toggle('show');
+    volumeWrap.setAttribute('aria-hidden', showing ? 'false' : 'true');
+    soundBtn.setAttribute('aria-expanded', showing ? 'true' : 'false');
+    if (showing) initAudio(); // 首次展开即就绪，拖动立刻出声
   });
+
+  // 拖动滑杆：实时调音量，滑到底静音；记住选择
+  volumeRange.addEventListener('input', function (e) {
+    e.stopPropagation();
+    volume = Math.max(0, Math.min(1, Number(volumeRange.value) / 100));
+    try { localStorage.setItem(VOL_KEY, String(volume)); } catch (err) {}
+    soundBtn.classList.toggle('muted', volume <= 0);
+    applyVolume(true);
+  });
+  volumeRange.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
 
   modeBtn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -442,8 +478,20 @@
   }
 
   // ---------- 交互绑定 ----------
+  function closeVolumePanel() {
+    if (!volumeWrap.classList.contains('show')) return;
+    volumeWrap.classList.remove('show');
+    volumeWrap.setAttribute('aria-hidden', 'true');
+    soundBtn.setAttribute('aria-expanded', 'false');
+  }
+
   function onPressDown(e) {
-    if (e.target && e.target.closest && e.target.closest('#sound-toggle, #mode-toggle')) return;
+    if (e.target && e.target.closest && e.target.closest('#volume-wrap, #sound-toggle')) return;
+    if (e.target && e.target.closest && e.target.closest('#mode-toggle')) {
+      closeVolumePanel();
+      return;
+    }
+    closeVolumePanel();
     if (!started) { begin(); return; }
     if (!autoMode && wordActive && !dissipating) {
       pressing = true;

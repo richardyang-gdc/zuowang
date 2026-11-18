@@ -118,6 +118,38 @@ body {
 /* 手动模式激活（默认自动；点亮表示"需手动长按"） */
 #mode-toggle.manual { color: rgba(236,222,190,.95); border-color: rgba(214,190,140,.55); background: rgba(66,56,38,.6); }
 
+/* ---- 竖向音量滑杆：点声音图标后从下方淡入，保持同一套暖灰与圆点语言 ---- */
+#volume-wrap {
+  position: fixed; z-index: 6; top: 66px; right: 18px;
+  width: 38px; height: 132px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(28,25,22,.5); border: 1px solid rgba(208,200,188,.18);
+  border-radius: 19px; backdrop-filter: blur(4px);
+  opacity: 0; pointer-events: none; transform: translateY(-6px);
+  transition: opacity .45s ease, transform .45s ease;
+}
+#volume-wrap.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+#volume-range {
+  -webkit-appearance: none; appearance: none;
+  writing-mode: vertical-lr; direction: rtl;   /* 上大下小 */
+  width: 4px; height: 104px; margin: 0;
+  background: rgba(218,212,202,.2); border-radius: 2px; outline: none;
+  cursor: pointer;
+}
+#volume-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: rgba(222,216,206,.85); border: 1px solid rgba(208,200,188,.5);
+  box-shadow: 0 0 6px rgba(222,216,206,.25); cursor: pointer;
+  transition: background .3s;
+}
+#volume-range::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: rgba(222,216,206,.85); border: 1px solid rgba(208,200,188,.5);
+  cursor: pointer;
+}
+#volume-range::-moz-range-track { width: 4px; background: rgba(218,212,202,.2); border-radius: 2px; }
+
 /* ---- 手动模式提示：仅手动 + 核心词正出现时，于其下方淡入 ---- */
 #press-hint {
   position: fixed; z-index: 4; left: 0; right: 0; top: calc(38% + clamp(100px, 28vw, 150px));

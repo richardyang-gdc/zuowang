@@ -6,6 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT) || 3000;
 // 默认监听所有网卡：本机 127.0.0.1 与 ECS 的内网/公网 IP 都能访问。
@@ -20,6 +21,90 @@ const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
 // ---- 初始化数据文件（只在项目目录内）----
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(LOG)) fs.writeFileSync(LOG, '', 'utf8');
+
+// ---- ryadmin 登录配置 ----
+const ADMIN_USER = 'richard.yang'; // 用户名写死在代码中，不进 .env
+const ENV_FILE = path.join(ROOT, '.env');
+function loadEnvFile() {
+  const out = {};
+  if (!fs.existsSync(ENV_FILE)) return out;
+  for (const line of fs.readFileSync(ENV_FILE, 'utf8').split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#') || t.indexOf('=') < 0) continue;
+    const i = t.indexOf('=');
+    out[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+  }
+  return out;
+}
+const ENV = loadEnvFile();
+const PASS_HASH = ENV.ADMIN_PASS_HASH || '';
+const PASS_SALT = ENV.ADMIN_PASS_SALT || '';
+
+// 内存会话：sessionId -> 过期时间戳；重启即失效
+const SESSION_MS = 24 * 60 * 60 * 1000;
+const sessions = new Map();
+function newSession() {
+  const sid = crypto.randomBytes(32).toString('hex');
+  sessions.set(sid, Date.now() + SESSION_MS);
+  return sid;
+}
+function parseCookies(req) {
+  const out = {};
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0) continue;
+    out[part.slice(0, i).trim()] = part.slice(i + 1).trim();
+  }
+  return out;
+}
+function isAuthed(req) {
+  const sid = parseCookies(req).zw_sid;
+  if (!sid) return false;
+  const exp = sessions.get(sid);
+  if (!exp) return false;
+  if (exp < Date.now()) { sessions.delete(sid); return false; }
+  return true;
+}
+function checkPassword(pass) {
+  if (!PASS_HASH || !PASS_SALT) return false;
+  let computed, expected;
+  try {
+    computed = crypto.scryptSync(String(pass), PASS_SALT, 64);
+    expected = Buffer.from(PASS_HASH, 'hex');
+  } catch (_) { return false; }
+  return computed.length === expected.length && crypto.timingSafeEqual(computed, expected);
+}
+
+// 登录失败限流：同一 IP 失败 5 次锁 15 分钟
+const fails = new Map();
+function clientIP(req) {
+  return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+}
+function lockedFor(req) {
+  const r = fails.get(clientIP(req));
+  if (!r) return 0;
+  if (r.until > Date.now()) return Math.ceil((r.until - Date.now()) / 1000);
+  // 仅当锁定已过期时清除记录；未锁定时保留失败计数，否则计数永远归零
+  if (r.until > 0) fails.delete(clientIP(req));
+  return 0;
+}
+function noteFail(req) {
+  const ip = clientIP(req);
+  const r = fails.get(ip) || { n: 0, until: 0 };
+  r.n++;
+  if (r.n >= 5) { r.until = Date.now() + 15 * 60 * 1000; r.n = 0; }
+  fails.set(ip, r);
+}
+function clearFails(req) { fails.delete(clientIP(req)); }
+
+function setSessionCookie(res, sid, secure) {
+  res.setHeader('Set-Cookie',
+    `zw_sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400` + (secure ? '; Secure' : ''));
+}
+function isSecureReq(req) {
+  return req.headers['x-forwarded-proto'] === 'https';
+}
 
 // ---- 串行写队列，避免并发 append 丢数据 ----
 let writeChain = Promise.resolve();
@@ -150,6 +235,34 @@ function computeStats(events) {
   const over3s = exits.filter(e => e.duration > 3000).length;
   const calm3s = exits.length ? +(over3s / exits.length * 100).toFixed(1) : 0;
 
+  // 每日访问趋势（近 30 天，按 UTC 自然日）
+  const dayMap = new Map();
+  for (const v of views) {
+    const d = new Date(v.ts);
+    const key = Number.isFinite(d.getTime())
+      ? d.toISOString().slice(0, 10) : 'unknown';
+    if (!dayMap.has(key)) dayMap.set(key, { pv: 0, ids: new Set() });
+    const slot = dayMap.get(key);
+    slot.pv++;
+    slot.ids.add(v.id);
+  }
+  const daily = Array.from(dayMap.entries())
+    .map(([date, slot]) => ({ date, pv: slot.pv, uv: slot.ids.size }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-30);
+
+  // 最近 20 条事件（时间倒序），ID 只留前 8 位
+  const recent = valid.slice()
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, 20)
+    .map(e => ({
+      ts: e.ts,
+      id: String(e.id).slice(0, 8),
+      src: e.src || 'direct',
+      event: e.event,
+      duration: Number.isFinite(e.duration) ? e.duration : undefined,
+    }));
+
   return {
     ok: true,
     generated_at: new Date().toISOString(),
@@ -161,6 +274,8 @@ function computeStats(events) {
     funnel,
     funnel_rate_pct: funnelRate,
     day7_return: day7,
+    daily,
+    recent,
   };
 }
 
@@ -194,8 +309,46 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { ok: true });
     }
 
-    if (req.method === 'GET' && p === '/api/stats') {
+    // ---- ryadmin 鉴权 ----
+    if (req.method === 'POST' && p === '/ryadmin/login') {
+      const wait = lockedFor(req);
+      if (wait > 0) return sendJSON(res, 429, { ok: false, error: `尝试过多，${wait} 秒后再试` });
+      const raw = await readBody(req);
+      let data;
+      try { data = JSON.parse(raw); } catch (_) { return sendJSON(res, 400, { ok: false, error: 'bad json' }); }
+      const userOk = typeof data.user === 'string' && data.user === ADMIN_USER;
+      const passOk = typeof data.pass === 'string' && checkPassword(data.pass);
+      if (!userOk || !passOk) {
+        noteFail(req);
+        return sendJSON(res, 401, { ok: false, error: '用户名或密码错误' });
+      }
+      clearFails(req);
+      setSessionCookie(res, newSession(), isSecureReq(req));
+      return sendJSON(res, 200, { ok: true });
+    }
+
+    if (req.method === 'POST' && p === '/ryadmin/logout') {
+      const sid = parseCookies(req).zw_sid;
+      if (sid) sessions.delete(sid);
+      res.setHeader('Set-Cookie', 'zw_sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+      return sendJSON(res, 200, { ok: true });
+    }
+
+    if (req.method === 'GET' && p === '/ryadmin/session') {
+      return sendJSON(res, 200, { ok: isAuthed(req) });
+    }
+
+    // 统计接口收进登录保护
+    if (req.method === 'GET' && (p === '/api/stats' || p === '/ryadmin/api/stats')) {
+      if (!isAuthed(req)) return sendJSON(res, 401, { ok: false, error: '未登录' });
       return sendJSON(res, 200, computeStats(readEvents()));
+    }
+
+    if (req.method === 'GET' && p === '/ryadmin') {
+      const file = path.join(PUBLIC, 'ryadmin.html');
+      if (!fs.existsSync(file)) return sendJSON(res, 404, { ok: false, error: 'not found' });
+      res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store' });
+      return res.end(fs.readFileSync(file));
     }
 
     if (req.method === 'GET' && (p === '/' || p === '/index.html')) {
@@ -254,7 +407,11 @@ server.listen(PORT, HOST, () => {
   console.log('坐忘 Senza 已启动');
   console.log(`  监听地址: ${HOST}:${PORT}`);
   console.log(`  本机访问: http://127.0.0.1:${PORT}`);
-  console.log(`  统计接口: http://127.0.0.1:${PORT}/api/stats`);
+  console.log(`  管理后台: http://127.0.0.1:${PORT}/ryadmin`);
+  if (!PASS_HASH || !PASS_SALT) {
+    console.log('  [提示] 未检测到 .env 密码配置，后台暂不可登录。');
+    console.log('         在服务器执行 bash deploy/set-password.sh 设置密码后重启。');
+  }
   const addrs = lanAddresses();
   if (addrs.length) {
     console.log('  网络访问（选一个可用 IP）:');

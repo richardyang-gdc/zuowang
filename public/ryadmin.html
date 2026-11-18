@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>坐忘 · 后台</title>
+<style>
+  :root {
+    --bg: #0d0c0b;
+    --panel: rgba(28,25,22,.55);
+    --line: rgba(208,200,188,.16);
+    --ink: rgba(228,222,212,.85);
+    --ink-soft: rgba(218,212,202,.5);
+    --ink-dim: rgba(218,212,202,.32);
+    --accent: rgba(214,190,140,.8);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 32px 20px 64px;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+
+  /* ---------- 登录 ---------- */
+  #login {
+    max-width: 320px; margin: 16vh auto 0; text-align: center;
+  }
+  #login h1 {
+    font-size: 17px; font-weight: 400; letter-spacing: .5em;
+    color: var(--ink-soft); margin: 0 0 36px;
+  }
+  #login input {
+    display: block; width: 100%; margin: 0 0 14px;
+    padding: 12px 14px; font-size: 14px;
+    color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px;
+    outline: none; transition: border-color .3s;
+  }
+  #login input:focus { border-color: rgba(214,190,140,.45); }
+  #login button {
+    width: 100%; margin-top: 6px; padding: 12px;
+    font-size: 14px; letter-spacing: .2em; color: var(--ink);
+    background: rgba(66,56,38,.5); border: 1px solid var(--line);
+    border-radius: 10px; cursor: pointer; transition: background .3s;
+  }
+  #login button:hover { background: rgba(84,70,46,.6); }
+  #login .err { min-height: 20px; color: var(--accent); font-size: 12px; margin-top: 12px; }
+
+  /* ---------- 仪表盘 ---------- */
+  #dash { display: none; }
+  .head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 28px;
+  }
+  .head h1 { font-size: 15px; font-weight: 400; letter-spacing: .4em; color: var(--ink-soft); margin: 0; }
+  .head .tools { font-size: 12px; color: var(--ink-dim); }
+  .head .tools a { color: var(--ink-soft); text-decoration: none; cursor: pointer; margin-left: 16px; }
+  .head .tools a:hover { color: var(--ink); }
+
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px 16px;
+  }
+  .card .k { font-size: 11px; color: var(--ink-dim); letter-spacing: .12em; margin-bottom: 10px; }
+  .card .v { font-size: 28px; font-weight: 300; line-height: 1; }
+  .card .u { font-size: 12px; color: var(--ink-dim); margin-left: 3px; }
+  .card .sub { font-size: 11px; color: var(--ink-dim); margin-top: 8px; }
+
+  .panels { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .panel h2 { font-size: 12px; font-weight: 400; color: var(--ink-soft); letter-spacing: .14em; margin: 0 0 18px; }
+
+  #chart { width: 100%; height: 130px; display: block; }
+  #chart .bar { fill: rgba(214,190,140,.42); }
+  #chart .bar:hover { fill: rgba(214,190,140,.75); }
+  #chart .axis { fill: var(--ink-dim); font-size: 9px; }
+  .chart-empty { font-size: 12px; color: var(--ink-dim); padding: 40px 0; text-align: center; }
+
+  .srcrow { margin-bottom: 14px; }
+  .srcrow:last-child { margin-bottom: 0; }
+  .srcrow .lbl { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-soft); margin-bottom: 6px; }
+  .srcbar { height: 4px; background: rgba(218,212,202,.12); border-radius: 2px; overflow: hidden; }
+  .srcbar i { display: block; height: 100%; background: rgba(214,190,140,.55); border-radius: 2px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid rgba(208,200,188,.08); }
+  th { color: var(--ink-dim); font-weight: 400; }
+  td { color: var(--ink-soft); }
+  td.dim { color: var(--ink-dim); }
+  .note { font-size: 11px; color: var(--ink-dim); margin-top: 18px; line-height: 1.7; }
+
+  @media (max-width: 720px) {
+    .cards { grid-template-columns: repeat(2, 1fr); }
+    .panels { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 登录 -->
+  <div id="login">
+    <h1>坐忘</h1>
+    <input id="user" type="text" value="richard.yang" autocomplete="username" aria-label="用户名">
+    <input id="pass" type="password" placeholder="密码" autocomplete="current-password" aria-label="密码">
+    <button id="login-btn">进入</button>
+    <div class="err" id="login-err"></div>
+  </div>
+
+  <!-- 仪表盘 -->
+  <div id="dash">
+    <div class="head">
+      <h1>坐忘 · 概览</h1>
+      <div class="tools"><span id="updated"></span><a id="refresh">刷新</a><a id="logout">退出</a></div>
+    </div>
+
+    <div class="cards">
+      <div class="card"><div class="k">来过的人</div><div class="v" id="m-uv">—</div><div class="sub">匿名访客 UV</div></div>
+      <div class="card"><div class="k">总浏览</div><div class="v" id="m-pv">—</div><div class="sub">页面浏览 PV</div></div>
+      <div class="card"><div class="k">7 日复访</div><div class="v" id="m-return">—<span class="u">%</span></div><div class="sub" id="m-mature">—</div></div>
+      <div class="card"><div class="k">平均停留</div><div class="v" id="m-dwell">—<span class="u">秒</span></div><div class="sub" id="m-calm">—</div></div>
+    </div>
+
+    <div class="panels">
+      <div class="panel">
+        <h2>每日访问</h2>
+        <div id="chart"></div>
+      </div>
+      <div class="panel">
+        <h2>来源</h2>
+        <div id="sources"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>最近访问</h2>
+      <table>
+        <thead><tr><th>时间</th><th>访客</th><th>来源</th><th>事件</th><th>停留</th></tr></thead>
+        <tbody id="recent"></tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      匿名访客按浏览器计数：清除缓存或更换设备会记为新访客。<br>
+      7 日复访只统计首访已满 7 天的人；未满 7 天者暂不判定。
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var loginEl = document.getElementById('login');
+  var dashEl = document.getElementById('dash');
+  var errEl = document.getElementById('login-err');
+  var userEl = document.getElementById('user');
+  var passEl = document.getElementById('pass');
+
+  var EVENT_LABEL = {
+    page_view: '访问', fog_revealed: '雾散', dissipate_done: '散去', exit: '离开'
+  };
+  var SRC_LABEL = { direct: '直接', qr: '二维码', short: '短链' };
+
+  function fmtTime(ts) {
+    var d = new Date(ts);
+    function p(n) { return n < 10 ? '0' + n : '' + n; }
+    return (d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  function showLogin(msg) {
+    dashEl.style.display = 'none';
+    loginEl.style.display = 'block';
+    errEl.textContent = msg || '';
+  }
+  function showDash() {
+    loginEl.style.display = 'none';
+    dashEl.style.display = 'block';
+    load();
+  }
+
+  function post(path, body) {
+    return fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function (r) { return r.json(); });
+  }
+
+  document.getElementById('login-btn').addEventListener('click', function () {
+    errEl.textContent = '';
+    post('/ryadmin/login', { user: userEl.value.trim(), pass: passEl.value })
+      .then(function (d) {
+        if (d.ok) { passEl.value = ''; showDash(); }
+        else { errEl.textContent = d.error || '登录失败'; }
+      })
+      .catch(function () { errEl.textContent = '网络错误'; });
+  });
+  passEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') document.getElementById('login-btn').click();
+  });
+
+  document.getElementById('logout').addEventListener('click', function () {
+    post('/ryadmin/logout').then(function () { showLogin(); });
+  });
+  document.getElementById('refresh').addEventListener('click', load);
+
+  function setText(id, v) { document.getElementById(id).textContent = v; }
+
+  function renderChart(daily) {
+    var box = document.getElementById('chart');
+    if (!daily || !daily.length) {
+      box.innerHTML = '<div class="chart-empty">暂无访问数据</div>';
+      return;
+    }
+    var W = 560, H = 130, pad = 18;
+    var max = 1;
+    daily.forEach(function (d) { if (d.pv > max) max = d.pv; });
+    var n = daily.length;
+    var gap = n > 1 ? (W - pad * 2) / (n - 1) : 0;
+    var bw = Math.max(4, Math.min(16, gap * 0.55));
+    var bars = daily.map(function (d, i) {
+      var h = (d.pv / max) * (H - 42);
+      var x = pad + i * gap - bw / 2;
+      var y = H - 22 - h;
+      var label = n <= 12 ? '<text class="axis" x="' + (pad + i * gap) + '" y="' + (H - 6) + '" text-anchor="middle">' + d.date.slice(5) + '</text>' : '';
+      return '<rect class="bar" x="' + x + '" y="' + y + '" width="' + bw + '" height="' + Math.max(1, h) + '" rx="2"><title>' + d.date + ' · PV ' + d.pv + ' / UV ' + d.uv + '</title></rect>' + label;
+    }).join('');
+    box.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">' + bars + '</svg>';
+  }
+
+  function renderSources(source) {
+    var box = document.getElementById('sources');
+    var keys = Object.keys(source || {});
+    if (!keys.length) { box.innerHTML = '<div class="chart-empty">暂无数据</div>'; return; }
+    var total = keys.reduce(function (s, k) { return s + source[k]; }, 0) || 1;
+    keys.sort(function (a, b) { return source[b] - source[a]; });
+    box.innerHTML = keys.map(function (k) {
+      var pct = (source[k] / total * 100).toFixed(1);
+      return '<div class="srcrow"><div class="lbl"><span>' + (SRC_LABEL[k] || k) + '</span><span>' + pct + '%</span></div>' +
+        '<div class="srcbar"><i style="width:' + pct + '%"></i></div></div>';
+    }).join('');
+  }
+
+  function renderRecent(recent) {
+    var tb = document.getElementById('recent');
+    if (!recent || !recent.length) {
+      tb.innerHTML = '<tr><td colspan="5" class="dim">暂无记录</td></tr>';
+      return;
+    }
+    tb.innerHTML = recent.map(function (e) {
+      var dur = e.duration ? (e.duration / 1000).toFixed(1) + 's' : '—';
+      return '<tr><td class="dim">' + fmtTime(e.ts) + '</td><td>' + e.id + '</td><td>' + (SRC_LABEL[e.src] || e.src) + '</td><td>' + (EVENT_LABEL[e.event] || e.event) + '</td><td class="dim">' + dur + '</td></tr>';
+    }).join('');
+  }
+
+  function load() {
+    fetch('/api/stats', { cache: 'no-store' })
+      .then(function (r) {
+        if (r.status === 401) { showLogin('登录已过期，请重新进入'); return null; }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (d) {
+        if (!d) return;
+        setText('m-uv', d.uv);
+        setText('m-pv', d.pv);
+        setText('m-return', d.day7_return.rate);
+        setText('m-mature', '满 7 天 ' + d.day7_return.mature + ' 人 · 复访 ' + d.day7_return.returned + ' 人');
+        setText('m-dwell', d.avg_dwell_sec);
+        setText('m-calm', '停留 >3 秒 ' + d.calm_3s_rate + '%');
+        document.querySelector('#m-return .u') && (document.querySelector('#m-return .u').textContent = '%');
+        document.querySelector('#m-dwell .u') && (document.querySelector('#m-dwell .u').textContent = '秒');
+        setText('updated', '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+        renderChart(d.daily);
+        renderSources(d.source);
+        renderRecent(d.recent);
+      })
+      .catch(function () { /* 静默失败，避免打扰 */ });
+  }
+
+  // 首屏探测会话
+  fetch('/ryadmin/session', { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { d.ok ? showDash() : showLogin(); })
+    .catch(function () { showLogin(); });
+})();
+</script>
+</body>
+</html>

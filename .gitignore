@@ -1,6 +1,9 @@
 # 运行时匿名埋点数据，不入库
 data/
 
+# ryadmin 登录凭据（scrypt 哈希与盐），绝不入库
+.env
+
 # 依赖与系统文件
 node_modules/
 .DS_Store

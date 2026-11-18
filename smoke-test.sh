@@ -1,5 +1,6 @@
 #!/bin/zsh
 # 坐忘 MVP 冒烟测试：只针对本机 127.0.0.1:3000，不碰其它目录/服务
+# 用法：SMOKE_PASS=你的密码 ./smoke-test.sh （后台鉴权后取统计）
 set -e
 
 BASE="http://127.0.0.1:3000"
@@ -7,9 +8,18 @@ NOW=$(date +%s)000
 D7=$((7 * 24 * 60 * 60 * 1000))
 D8=$((8 * 24 * 60 * 60 * 1000))
 D2=$((2 * 24 * 60 * 60 * 1000))
+COOKIE_JAR=$(mktemp)
 
 echo "==> 1. 健康检查"
 curl -s "$BASE/api/health"; echo
+
+echo "==> 1b. 后台登录"
+if [ -n "${SMOKE_PASS:-}" ]; then
+  curl -s -c "$COOKIE_JAR" -X POST "$BASE/ryadmin/login" -H 'Content-Type: application/json' \
+    -d "{\"user\":\"richard.yang\",\"pass\":\"$SMOKE_PASS\"}"; echo
+else
+  echo "  (未设 SMOKE_PASS，跳过登录；取统计将返回 401)"
+fi
 
 echo "==> 2. 清空旧数据（仅 trunc 项目内 data/visits.jsonl）"
 : > "/Users/Richard/Documents/workbuddy/zuowang-mvp/data/visits.jsonl"
@@ -34,7 +44,8 @@ curl -s -X POST "$BASE/api/pv" -H 'Content-Type: application/json' \
 curl -s -X POST "$BASE/api/pv" -H 'Content-Type: application/json' \
   -d "{\"id\":\"aaaaaaaa-0000-4000-8000-000000000001\",\"ts\":$((NOW-D2+45000)),\"event\":\"exit\",\"src\":\"qr\",\"duration\":45000}" > /dev/null
 
-echo "==> 4. 拉取统计"
-curl -s "$BASE/api/stats" | python3 -m json.tool
+echo "==> 4. 拉取统计（带会话 Cookie）"
+curl -s -b "$COOKIE_JAR" "$BASE/api/stats" | python3 -m json.tool
 echo
 echo "==> 预期：pv=4, uv=3, day7.mature=2, day7.returned=1, day7.rate=50"
+rm -f "$COOKIE_JAR"

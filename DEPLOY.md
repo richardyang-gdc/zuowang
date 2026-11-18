@@ -5,7 +5,7 @@
 ## 一、它怎么工作
 
 ```
-本地改代码 → npm run dev 热更新看效果 → git push → 服务器 update.sh → 线上验证
+本地改代码 → npm run dev 热更新看效果 → git push → 服务器 git pull + deploy.sh → 线上验证
 ```
 
 - 前端 API 用相对路径 `/api/pv`，天然跟随当前域名/IP，无需改地址。
@@ -14,36 +14,54 @@
 
 ## 二、首次部署（一次性）
 
-**1. 确保代码已推送到 GitHub main**（注意本地与远端历史可能无关，先处理 non-fast-forward 再推）。
+**1. 本地把最新代码推送到 GitHub main**（含 `/ryadmin` 后台的版本）。若遇 non-fast-forward，按之前给过的 merge 命令先处理。
 
-**2. SSH 登录 ECS，把仓库克隆到 `/opt/zuowang` 并一键装服务：**
+**2. SSH 登录服务器，克隆仓库：**
 
 ```bash
-ssh root@你的ECS公网IP
+ssh root@你的公网IP
 git clone https://github.com/richardyang-gdc/zuowang.git /opt/zuowang
 cd /opt/zuowang
-sudo bash deploy/setup-ecs.sh
 ```
 
-脚本会：检查 Node → 建 `zuowang` 运行用户 → 拉代码 → 建数据目录和权限 → 安装 systemd 服务 → 本机健康检查 → 尝试放行系统防火墙。
+**3. 云控制台放行端口（必须手动做，脚本无法代劳）**
 
-**3. 云控制台安全组放行端口（必须手动做，脚本无法代劳）**
-
-- 腾讯云 ECS → 实例 → 安全组 → 入站规则 → 添加规则
+- 腾讯云轻量应用服务器 → 实例 → 防火墙 → 添加规则
 - 协议 TCP，端口 `3000`，来源 `0.0.0.0/0`（测试期可先限定你自己的 IP 更安全）
 - 保存后立即生效
 
-**4. 外网验证**
+## 三、每次部署 / 迭代（含首次克隆后）
 
-浏览器打开 `http://你的ECS公网IP:3000`，另开一条验证统计：
+在服务器上执行两步：
 
 ```bash
-curl http://你的ECS公网IP:3000/api/stats
+cd /opt/zuowang
+git pull
+sudo bash deploy/deploy.sh
+```
+
+一键脚本会：检查并在需要时装 Node.js 22 → 建 `zuowang` 运行用户与 `data/` → 首次生成后台随机密码并写入 `.env`（scrypt 哈希 + 盐，权限 600）→ 安装 systemd 服务 → 启动 → 健康检查 → 打印访问地址。
+
+- **首次运行**会在终端打印一次随机管理员密码，只显示这一次，请立即保存。
+- **再次运行**默认保留已有 `.env`，不会覆盖密码。
+- 要改密码：`sudo ADMIN_PASS='你的新密码' bash deploy/deploy.sh`，或交互式 `sudo bash deploy/set-password.sh`。
+- `git pull` 不会覆盖 `.env` 和 `data/visits.jsonl`（都已在 `.gitignore`）。
+
+后台入口 `http://你的公网IP:3000/ryadmin`，用户名固定 `richard.yang`，密码见上一步。
+
+**外网验证**
+
+浏览器打开 `http://你的ECS公网IP:3000`。统计接口 `/api/stats` **已加登录保护**，不带会话 Cookie 会返回 401；请通过 `/ryadmin` 登录后查看，或用：
+
+```bash
+curl -c /tmp/ck -X POST http://你的ECS公网IP:3000/ryadmin/login \
+  -H 'Content-Type: application/json' -d '{"user":"richard.yang","pass":"你的密码"}'
+curl -b /tmp/ck http://你的ECS公网IP:3000/api/stats
 ```
 
 服务日志：`journalctl -u zuowang -f`。若端口想换，改 `deploy/zuowang.service` 里的 `Environment=PORT=xxxx`，再 `systemctl daemon-reload && systemctl restart zuowang`，安全组同步放行新端口。
 
-## 三、日常迭代（每次改代码）
+## 四、日常迭代（每次改代码）
 
 **本地热更新看效果：**
 
@@ -54,38 +72,34 @@ npm run dev          # Node 内置 --watch，改完 server.js 自动重启
 
 前端 `public/` 下的 HTML/CSS/JS 是静态文件，改完刷新浏览器即可，不用重启服务。若占用 3000 端口：`PORT=3001 npm run dev`。
 
-**一条命令完成提交 + 上线 + 验证：**
+**本地提交并推送：**
 
 ```bash
-./deploy/dev-deploy.sh "本次改动说明" root@你的ECS公网IP
+git add -A && git commit -m "本次改动说明" && git push origin main
 ```
 
-它会 `git add -A && git commit && git push` → SSH 到服务器执行 `update.sh`（拉代码、保数据、重启、健康检查）。
-
-不带服务器参数则只推送：
+**服务器上线（就是第三节那两步）：**
 
 ```bash
-./deploy/dev-deploy.sh "本次改动说明"
-# 然后到服务器手动：ssh root@IP 'bash /opt/zuowang/deploy/update.sh'
+cd /opt/zuowang
+git pull
+sudo bash deploy/deploy.sh
 ```
 
-也可以只设一次默认服务器，以后省掉第二个参数：
-
-```bash
-export ZUOWANG_SERVER=root@你的ECS公网IP
-```
+一键脚本不会动 `data/` 和 `.env`，所以历史埋点和后台密码都会保留。
 
 **验证清单（每次部署后）：**
 
 ```bash
 curl http://你的ECS公网IP:3000/api/health   # 应返回 ok:true
-curl http://你的ECS公网IP:3000/api/stats    # 看 pv/uv 是否在涨
+curl http://你的ECS公网IP:3000/ryadmin      # 应返回登录页 HTML
+curl http://你的ECS公网IP:3000/api/stats    # 未登录应返回 401
 journalctl -u zuowang -n 20 --no-pager      # 看有无报错
 ```
 
-浏览器开无痕窗口访问一次，`/api/stats` 的 pv 应该 +1。
+浏览器打开 `/ryadmin` 登录后，开无痕窗口访问一次主页，刷新后台 pv 应 +1。
 
-## 四、常用运维
+## 五、常用运维
 
 | 操作 | 命令 |
 | --- | --- |
@@ -97,15 +111,15 @@ journalctl -u zuowang -n 20 --no-pager      # 看有无报错
 | 备份数据 | `cp /opt/zuowang/data/visits.jsonl ~/visits-$(date +%F).jsonl` |
 | 回滚 | `git -C /opt/zuowang reset --hard <旧commit>` 后 `systemctl restart zuowang` |
 
-## 五、安全提醒（上线前至少做一条）
+## 六、安全提醒（上线前至少做一条）
 
-现在服务直接暴露在公网，`/api/stats` 任何人都能看到你的访问数据。MVP 阶段可接受，但要长期用，建议：
+`/api/stats` 和 `/ryadmin` 已由登录会话保护（scrypt 校验 + HttpOnly Cookie + 失败限流），`.env` 只存哈希与盐、权限 600。长期用还建议：
 
-1. **最简**：安全组来源限定为公司/家里固定 IP，或给服务器挂安全组白名单。
-2. **推荐**：前面加 Nginx 反代 80/443，`/api/stats` 加 basic auth；同时上 HTTPS（腾讯云免费证书）。此时 systemd 里的 `PORT` 可改回 `3000` 只给本机 Nginx 用，并把 `HOST=127.0.0.1` 写回 service。
-3. **接口防护**：`POST /api/pv` 目前只校验 id 格式，任何人可刷；正式运营可加简单 token 或限流。
+1. **最简**：安全组来源限定为公司/家里固定 IP，减少暴露面。
+2. **推荐**：前面加 Nginx 反代 80/443 并上 HTTPS（腾讯云免费证书）；识别到 HTTPS 时登录 Cookie 会自动加 `Secure`。此时 systemd 里 `PORT` 可保持 `3000`，并把 `HOST=127.0.0.1` 写回 service 只给本机 Nginx 用。
+3. **接口防护**：`POST /api/pv` 目前只校验 id 格式，任何人可刷埋点；正式运营可加简单 token 或限流。
 
-## 六、环境变量速查
+## 七、环境变量速查
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
