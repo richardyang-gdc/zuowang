@@ -119,6 +119,32 @@ journalctl -u zuowang -n 20 --no-pager      # 看有无报错
 2. **推荐**：前面加 Nginx 反代 80/443 并上 HTTPS（腾讯云免费证书）；识别到 HTTPS 时登录 Cookie 会自动加 `Secure`。此时 systemd 里 `PORT` 可保持 `3000`，并把 `HOST=127.0.0.1` 写回 service 只给本机 Nginx 用。
 3. **接口防护**：`POST /api/pv` 目前只校验 id 格式，任何人可刷埋点；正式运营可加简单 token 或限流。
 
+### Nginx 反代配置（配合登录限流必须有 `X-Forwarded-For`）
+
+`server.js` 的失败限流按 `X-Forwarded-For` 识别来源。如果反代只传 `X-Real-IP`，所有请求都会被当成 `127.0.0.1`，**任何一个人输错 5 次密码就会锁住全部人 15 分钟**。配置如下：
+
+```bash
+sudo tee /etc/nginx/sites-available/zuowang <<'EOF'
+server {
+    listen 80;
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+sudo ln -sf /etc/nginx/sites-available/zuowang /etc/nginx/sites-enabled/zuowang
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+上 HTTPS 后，把 `listen 80` 改为跳转并新增 `listen 443 ssl`，`X-Forwarded-Proto` 就能让服务正确判断并给 Cookie 加 `Secure`。
+
 ## 七、环境变量速查
 
 | 变量 | 默认 | 说明 |
